@@ -9,7 +9,8 @@ use tauri::{AppHandle, State};
 
 pub struct ScanState {
     pub cancelled: Arc<AtomicBool>,
-    pub db: Arc<Mutex<Connection>>,
+    pub db: Arc<Mutex<Connection>>,         // Write connection (walkers)
+    pub read_db: Arc<Mutex<Connection>>,    // Read connection (queries — no lock contention in WAL)
     pub current_scan_id: Arc<Mutex<Option<i64>>>,
     pub view_path: Arc<Mutex<String>>,
 }
@@ -19,11 +20,13 @@ impl ScanState {
         let db_path = db::db_path();
         let conn = Connection::open(&db_path).expect("Failed to open database");
         db::init_db(&conn).expect("Failed to initialize database");
+        let read_conn = db::open_read_connection().expect("Failed to open read connection");
         eprintln!("[db] opened database at {:?}", db_path);
 
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
             db: Arc::new(Mutex::new(conn)),
+            read_db: Arc::new(Mutex::new(read_conn)),
             current_scan_id: Arc::new(Mutex::new(None)),
             view_path: Arc::new(Mutex::new(String::new())),
         }
@@ -111,7 +114,7 @@ pub fn get_children(
         .lock()
         .unwrap()
         .ok_or("No active scan")?;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = state.read_db.lock().map_err(|e| e.to_string())?;
 
     let entries =
         db::get_children(&conn, scan_id, &path).map_err(|e| format!("DB error: {}", e))?;
@@ -198,14 +201,14 @@ pub fn get_latest_scan(
     scan_state: State<'_, Mutex<ScanState>>,
 ) -> Result<Option<ScanMeta>, String> {
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = state.read_db.lock().map_err(|e| e.to_string())?;
     db::get_latest_scan(&conn).map_err(|e| format!("DB error: {}", e))
 }
 
 #[tauri::command]
 pub fn list_scans(scan_state: State<'_, Mutex<ScanState>>) -> Result<Vec<ScanMeta>, String> {
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = state.read_db.lock().map_err(|e| e.to_string())?;
     db::list_scans(&conn).map_err(|e| format!("DB error: {}", e))
 }
 
@@ -215,7 +218,7 @@ pub fn load_scan(
     scan_state: State<'_, Mutex<ScanState>>,
 ) -> Result<ScanMeta, String> {
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    let conn = state.read_db.lock().map_err(|e| e.to_string())?;
 
     // Verify the scan exists by checking the scans table
     let meta: ScanMeta = conn

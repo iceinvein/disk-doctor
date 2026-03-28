@@ -10,7 +10,30 @@ pub fn db_path() -> PathBuf {
     path
 }
 
+/// Open a separate read-only connection for queries.
+/// With WAL mode, this doesn't block the write connection.
+pub fn open_read_connection() -> rusqlite::Result<Connection> {
+    let path = db_path();
+    let conn = Connection::open_with_flags(
+        &path,
+        rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY | rusqlite::OpenFlags::SQLITE_OPEN_NO_MUTEX,
+    )?;
+    conn.execute_batch("PRAGMA cache_size = -32000; PRAGMA mmap_size = 268435456;")?;
+    Ok(conn)
+}
+
 pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
+    // Performance pragmas — WAL allows concurrent reads + writes
+    conn.execute_batch(
+        "
+        PRAGMA journal_mode = WAL;
+        PRAGMA synchronous = NORMAL;
+        PRAGMA cache_size = -64000;
+        PRAGMA mmap_size = 268435456;
+        PRAGMA temp_store = MEMORY;
+    ",
+    )?;
+
     conn.execute_batch(
         "
         CREATE TABLE IF NOT EXISTS scans (

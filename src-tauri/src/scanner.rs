@@ -131,16 +131,24 @@ pub fn scan_directory(
         scanned_count.load(Ordering::Relaxed)
     );
 
-    // --- Emitter thread: periodically queries DB, emits view-update ---
+    // --- Emitter thread: uses its own read connection (WAL = no lock contention) ---
     let emitter_handle = {
         let done = done.clone();
         let cancelled = cancelled.clone();
         let scanned_count = scanned_count.clone();
         let app_handle = app_handle.clone();
-        let db = db.clone();
         let view_path = view_path.clone();
 
         std::thread::spawn(move || {
+            // Open a dedicated read-only connection — doesn't block writers
+            let read_conn = match db::open_read_connection() {
+                Ok(c) => c,
+                Err(e) => {
+                    eprintln!("[scan] failed to open read connection: {}", e);
+                    return;
+                }
+            };
+
             let mut emit_count: u32 = 0;
 
             loop {
@@ -154,14 +162,12 @@ pub fn scan_directory(
 
                 let vp = view_path.lock().unwrap().clone();
 
-                // Use live-computed sizes during scan (directories sum their subtree files)
-                let conn = db.lock().unwrap();
-                let (entries, parent_live_size) = match db::get_children_with_live_sizes(&conn, scan_id, &vp) {
+                // Use live-computed sizes — reads don't block writes in WAL mode
+                let (entries, parent_live_size) = match db::get_children_with_live_sizes(&read_conn, scan_id, &vp) {
                     Ok(result) => result,
                     Err(_) => continue,
                 };
-                let parent = db::get_entry(&conn, scan_id, &vp).ok().flatten();
-                drop(conn);
+                let parent = db::get_entry(&read_conn, scan_id, &vp).ok().flatten();
 
                 let (parent_path, parent_size, parent_name) = match &parent {
                     Some(p) => (p.path.clone(), parent_live_size, p.name.clone()),
@@ -210,7 +216,7 @@ pub fn scan_directory(
         let mut local_buf: Vec<(String, String, String, u64, bool, u32, i64, bool, bool)> =
             Vec::new();
         let mut local_count: u32 = 0;
-        let flush_every = 500;
+        let flush_every = 2000;
 
         // Walk this subtree — skip the root dir itself (already added above)
         for entry in WalkDir::new(dir_path).follow_links(false).min_depth(1) {

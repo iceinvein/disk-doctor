@@ -51,7 +51,7 @@ export function FileList() {
   }
 
   return (
-    <div className="flex-1 flex flex-col min-h-0">
+    <div className="flex-1 flex flex-col min-h-0" key={state.currentPath.join('/')}>
       {/* Column headers */}
       <div className="flex items-center h-8 px-3 gap-3 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] shrink-0">
         {/* Spacer for checkbox + icon */}
@@ -66,7 +66,7 @@ export function FileList() {
         </button>
 
         {/* Spacer for bar */}
-        <div className="w-24 shrink-0" />
+        <div className="w-28 shrink-0" />
 
         <button
           onClick={() => handleSort('size')}
@@ -77,7 +77,7 @@ export function FileList() {
       </div>
 
       {/* Virtualized list */}
-      <div ref={parentRef} className="flex-1 overflow-auto">
+      <div ref={parentRef} className="flex-1 overflow-auto nav-transition">
         <div
           style={{ height: `${virtualizer.getTotalSize()}px` }}
           className="relative w-full"

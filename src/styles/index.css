@@ -1,18 +1,42 @@
 @import "tailwindcss";
 
 :root {
-  --color-bg-primary: #0f0f1a;
-  --color-bg-secondary: #1a1a30;
-  --color-bg-tertiary: #15152a;
-  --color-bg-row: #1e1e38;
-  --color-bg-hover: #252545;
-  --color-bg-selected: rgba(99, 102, 241, 0.1);
-  --color-border: #2d2d4a;
-  --color-text-primary: #e2e8f0;
-  --color-text-secondary: #7c7c9a;
-  --color-accent: #6366f1;
-  --color-accent-light: #a78bfa;
-  --color-danger: #dc2626;
+  /* Backgrounds - warm gray, not cold navy */
+  --color-bg-primary: #1c1c1e;
+  --color-bg-secondary: #2c2c2e;
+  --color-bg-tertiary: #242426;
+  --color-bg-row: #2c2c2e;
+  --color-bg-hover: #363638;
+  --color-bg-selected: rgba(10, 132, 255, 0.12);
+
+  /* Borders */
+  --color-border: #3a3a3c;
+  --color-border-light: #48484a;
+
+  /* Text */
+  --color-text-primary: #f5f5f7;
+  --color-text-secondary: #98989d;
+  --color-text-tertiary: #6e6e73;
+
+  /* Accent - macOS blue */
+  --color-accent: #0a84ff;
+  --color-accent-hover: #409cff;
+
+  /* Semantic */
+  --color-danger: #ff453a;
+  --color-danger-bg: rgba(255, 69, 58, 0.12);
+  --color-success: #30d158;
+  --color-warning: #ffd60a;
+
+  /* File type category colors */
+  --color-cat-folder: #0a84ff;
+  --color-cat-media: #ff6b35;
+  --color-cat-audio: #bf5af2;
+  --color-cat-archive: #ffd60a;
+  --color-cat-code: #30d158;
+  --color-cat-document: #64d2ff;
+  --color-cat-system: #98989d;
+  --color-cat-other: #636366;
 }
 
 html, body {
@@ -26,16 +50,39 @@ html, body {
   height: 100vh;
 }
 
+/* macOS-style scrollbar */
 ::-webkit-scrollbar {
   width: 8px;
 }
 ::-webkit-scrollbar-track {
-  background: var(--color-bg-primary);
+  background: transparent;
 }
 ::-webkit-scrollbar-thumb {
-  background: var(--color-border);
+  background: rgba(255, 255, 255, 0.15);
   border-radius: 4px;
 }
 ::-webkit-scrollbar-thumb:hover {
-  background: var(--color-text-secondary);
+  background: rgba(255, 255, 255, 0.25);
+}
+
+/* Transitions for navigation */
+.nav-transition {
+  animation: slideIn 0.15s ease-out;
+}
+@keyframes slideIn {
+  from { opacity: 0; transform: translateX(8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+.fade-in {
+  animation: fadeIn 0.2s ease-out;
+}
+@keyframes fadeIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* Focus trap styles */
+.modal-overlay {
+  animation: fadeIn 0.15s ease-out;
 }

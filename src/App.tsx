@@ -4,6 +4,7 @@ import { appReducer, initialState } from './state/reducer'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { Titlebar } from './components/Titlebar'
 import { Toolbar } from './components/Toolbar'
+import { DiskUsageBar } from './components/DiskUsageBar'
 import { FileList } from './components/FileList'
 import { DetailPanel } from './components/DetailPanel'
 import { StatusBar } from './components/StatusBar'
@@ -37,6 +38,7 @@ export default function App() {
         {state.tree ? (
           <>
             <Toolbar />
+            <DiskUsageBar />
             <div className="flex flex-1 min-h-0">
               <FileList />
               <DetailPanel />

@@ -26,7 +26,7 @@ export function useScan() {
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path })
-      const scanTime = Math.round(performance.now() - start)
+      const scanTime = (performance.now() - start) / 1000
 
       dispatch({ type: 'SET_TREE', tree, scanTime })
     } catch (error) {
@@ -53,7 +53,7 @@ export function useScan() {
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path: '/' })
-      const scanTime = Math.round(performance.now() - start)
+      const scanTime = (performance.now() - start) / 1000
 
       dispatch({ type: 'SET_TREE', tree, scanTime })
     } catch (error) {

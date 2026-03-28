@@ -54,7 +54,7 @@ export function ConfirmDialog({ title, message, confirmLabel, onConfirm, onCance
           <button
             data-cancel
             onClick={onCancel}
-            className="px-4 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer"
+            className="px-4 py-2 rounded-lg text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] transition-colors cursor-pointer btn-press"
           >
             Cancel
           </button>

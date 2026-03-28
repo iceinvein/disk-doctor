@@ -65,6 +65,7 @@ export function FileRow({
               e.stopPropagation()
               onNavigate()
             }}
+            title={entry.name}
             className="text-[var(--color-text-primary)] hover:text-[var(--color-accent)] transition-colors cursor-pointer text-left"
           >
             {entry.name}

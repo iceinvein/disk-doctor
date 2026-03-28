@@ -11,7 +11,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     title: 'Navigation',
     shortcuts: [
       { keys: '\u2190 / Backspace', description: 'Go back' },
-      { keys: 'Double-click', description: 'Open folder' },
+      { keys: 'Click name', description: 'Open folder' },
       { keys: 'Escape', description: 'Deselect all' },
     ],
   },

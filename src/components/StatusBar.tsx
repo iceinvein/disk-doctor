@@ -68,7 +68,7 @@ export function StatusBar() {
       {scanning ? (
         <button
           onClick={cancelScan}
-          className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+          className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer btn-press"
         >
           <XCircle size={12} />
           Cancel

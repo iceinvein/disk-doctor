@@ -1,4 +1,5 @@
 import { useEffect } from 'react'
+import { X } from 'lucide-react'
 import { useStore } from './state/store'
 import { useScanEvents, useNavigation } from './hooks/useTauri'
 import { WelcomeScreen } from './components/WelcomeScreen'
@@ -110,7 +111,7 @@ export default function App() {
               onClick={() => setError(null)}
               className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
             >
-              ✕
+              <X size={14} />
             </button>
           </div>
         </div>

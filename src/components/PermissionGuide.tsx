@@ -54,7 +54,7 @@ export function PermissionGuide() {
       {/* Back button */}
       <button
         onClick={handleBack}
-        className="absolute top-16 left-4 flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"
+        className="self-start flex items-center gap-1 text-sm text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer mb-6"
       >
         <ArrowLeft size={16} />
         Back

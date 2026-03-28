@@ -13,6 +13,7 @@ export function Titlebar() {
       {rootPath && (
         <button
           onClick={reset}
+          title="Start a new scan"
           className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
         >
           <RotateCcw size={12} />

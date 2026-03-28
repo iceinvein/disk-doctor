@@ -84,6 +84,7 @@ export function Toolbar() {
 
       <button
         onClick={scanFolder}
+        title="Scan a new folder"
         className="flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-[var(--color-accent)] text-white text-xs font-medium hover:bg-[var(--color-accent-hover)] transition-colors cursor-pointer shrink-0"
       >
         <FolderSearch size={13} />

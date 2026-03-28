@@ -41,11 +41,11 @@ export function DiskUsageBar() {
         <span className="flex items-center gap-2">
           {formatSize(usage.used)} used of {formatSize(usage.total)}
           <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] inline-block" />
+            <span className="w-2 h-2 rounded-full bg-[var(--color-accent)] inline-block" />
             Scanned
           </span>
           <span className="flex items-center gap-1">
-            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-tertiary)] opacity-30 inline-block" />
+            <span className="w-2 h-2 rounded-full bg-[var(--color-text-tertiary)] opacity-30 inline-block" />
             Other
           </span>
         </span>

@@ -4,7 +4,11 @@ import { listen } from '@tauri-apps/api/event'
 import { useAppState } from '../state/context'
 import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
 
-export function useScan() {
+/**
+ * Set up Tauri event listeners for scan streaming.
+ * Call this ONCE at the App level so listeners survive component swaps.
+ */
+export function useScanEvents() {
   const { dispatch } = useAppState()
 
   useEffect(() => {
@@ -26,6 +30,10 @@ export function useScan() {
       unlistenUpdated.then((fn) => fn())
     }
   }, [dispatch])
+}
+
+export function useScan() {
+  const { dispatch } = useAppState()
 
   const scanFolder = useCallback(async () => {
     try {

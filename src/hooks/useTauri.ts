@@ -12,13 +12,18 @@ export function useScan() {
       dispatch({ type: 'SET_SCAN_PROGRESS', progress: event.payload })
     })
 
-    const unlistenEntry = listen<DirEntry>('scan-entry', (event) => {
-      dispatch({ type: 'ADD_SCANNED_ENTRY', entry: event.payload })
+    const unlistenDiscovered = listen<DirEntry[]>('scan-entries-discovered', (event) => {
+      dispatch({ type: 'SET_DISCOVERED_ENTRIES', entries: event.payload })
+    })
+
+    const unlistenUpdated = listen<DirEntry>('scan-entry-updated', (event) => {
+      dispatch({ type: 'UPDATE_SCANNED_ENTRY', entry: event.payload })
     })
 
     return () => {
       unlistenProgress.then((fn) => fn())
-      unlistenEntry.then((fn) => fn())
+      unlistenDiscovered.then((fn) => fn())
+      unlistenUpdated.then((fn) => fn())
     }
   }, [dispatch])
 

@@ -63,17 +63,33 @@ export function appReducer(state: AppState, action: Action): AppState {
         showPermissionGuide: false,
       }
 
-    case 'ADD_SCANNED_ENTRY': {
+    case 'SET_DISCOVERED_ENTRIES': {
       if (!state.tree) return state
-      const newChildren = [...state.tree.children, action.entry]
-      newChildren.sort((a, b) => b.size - a.size)
-      const newSize = newChildren.reduce((sum, c) => sum + c.size, 0)
+      const totalSize = action.entries.reduce((sum, c) => sum + c.size, 0)
       return {
         ...state,
         tree: {
           ...state.tree,
-          children: newChildren,
-          child_count: newChildren.length,
+          children: action.entries,
+          child_count: action.entries.length,
+          size: totalSize,
+        },
+      }
+    }
+
+    case 'UPDATE_SCANNED_ENTRY': {
+      if (!state.tree) return state
+      const updated = state.tree.children.map((child) =>
+        child.path === action.entry.path ? action.entry : child,
+      )
+      updated.sort((a, b) => b.size - a.size)
+      const newSize = updated.reduce((sum, c) => sum + c.size, 0)
+      return {
+        ...state,
+        tree: {
+          ...state.tree,
+          children: updated,
+          child_count: updated.length,
           size: newSize,
         },
       }

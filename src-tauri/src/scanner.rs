@@ -17,9 +17,15 @@ struct FlatEntry {
     is_restricted: bool,
 }
 
-/// Scan a directory tree, emitting each top-level child as a `scan-entry` event
-/// as soon as it's fully scanned. This allows the frontend to show results
-/// incrementally instead of waiting for the entire scan to complete.
+/// Two-phase streaming scan:
+///
+/// Phase 1 (instant): Read all immediate children of root. Files get their
+/// real size, directories start at size 0. Emit `scan-entries-discovered`
+/// so the UI populates immediately.
+///
+/// Phase 2 (progressive): For each directory child, scan its full subtree.
+/// After each directory completes, emit `scan-entry-updated` with the real
+/// size and full subtree. The UI updates that entry's bar in real-time.
 pub fn scan_directory(
     root: &str,
     app_handle: &AppHandle,
@@ -42,12 +48,10 @@ pub fn scan_directory(
         .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
         .unwrap_or(0);
 
-    // Read immediate children of root
+    // ── Phase 1: discover immediate children (fast) ──────────────────
     let read_dir = std::fs::read_dir(root_path).map_err(|e| e.to_string())?;
 
     let mut children: Vec<DirEntry> = Vec::new();
-    let mut scanned_count: u32 = 0;
-    let mut last_emit = Instant::now();
 
     for dir_entry_result in read_dir {
         if cancelled.load(Ordering::Relaxed) {
@@ -67,49 +71,73 @@ pub fn scan_directory(
         let is_symlink = ft.map(|f| f.is_symlink()).unwrap_or(false);
         let is_dir = ft.map(|f| f.is_dir()).unwrap_or(false);
 
-        let child_entry = if is_dir && !is_symlink {
-            // Recursively scan this child directory
-            scan_subtree(
-                &child_path_str,
-                &cancelled,
-                &mut scanned_count,
-                app_handle,
-                &mut last_emit,
-            )
+        let meta = dir_entry.metadata().ok();
+        let size = if is_dir || is_symlink {
+            0 // Directory sizes computed in phase 2
         } else {
-            // File or symlink — just get metadata
-            let meta = dir_entry.metadata().ok();
-            let size = if is_symlink {
-                0
-            } else {
-                meta.as_ref().map(|m| m.len()).unwrap_or(0)
-            };
-            let modified = meta
-                .as_ref()
-                .and_then(|m| m.modified().ok())
-                .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-                .unwrap_or(0);
-            let is_restricted = meta.is_none();
-
-            scanned_count += 1;
-
-            DirEntry {
-                path: child_path_str,
-                name: child_name,
-                size,
-                is_dir: false,
-                child_count: 0,
-                modified,
-                is_symlink,
-                is_restricted,
-                children: vec![],
-            }
+            meta.as_ref().map(|m| m.len()).unwrap_or(0)
         };
+        let modified = meta
+            .as_ref()
+            .and_then(|m| m.modified().ok())
+            .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
+            .unwrap_or(0);
+        let is_restricted = !is_symlink && meta.is_none();
 
-        // Emit this child to the frontend for live display
-        let _ = app_handle.emit("scan-entry", &child_entry);
+        children.push(DirEntry {
+            path: child_path_str,
+            name: child_name,
+            size,
+            is_dir,
+            child_count: 0,
+            modified,
+            is_symlink,
+            is_restricted,
+            children: vec![],
+        });
+    }
 
-        children.push(child_entry);
+    // Sort files by size desc, dirs by name (since dir sizes are 0 still)
+    children.sort_by(|a, b| {
+        if a.is_dir == b.is_dir {
+            b.size.cmp(&a.size).then_with(|| a.name.cmp(&b.name))
+        } else if a.is_dir {
+            std::cmp::Ordering::Less // dirs first
+        } else {
+            std::cmp::Ordering::Greater
+        }
+    });
+
+    // Emit all discovered entries immediately — UI populates the list
+    let _ = app_handle.emit("scan-entries-discovered", &children);
+
+    // ── Phase 2: scan each directory child fully (progressive) ───────
+    let mut scanned_count: u32 = children.iter().filter(|c| !c.is_dir).count() as u32;
+    let mut last_emit = Instant::now();
+
+    for child in &mut children {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+
+        if !child.is_dir || child.is_symlink {
+            continue;
+        }
+
+        // Scan this directory's full subtree
+        let scanned = scan_subtree(
+            &child.path,
+            &cancelled,
+            &mut scanned_count,
+            app_handle,
+            &mut last_emit,
+        );
+
+        // Update the child in place
+        *child = scanned;
+
+        // Emit the completed entry so the UI updates this row's bar
+        let _ = app_handle.emit("scan-entry-updated", &*child);
     }
 
     // Final progress event
@@ -121,7 +149,7 @@ pub fn scan_directory(
         },
     );
 
-    // Sort children by size descending
+    // Final sort by size descending
     children.sort_by(|a, b| b.size.cmp(&a.size));
 
     let total_size: u64 = children.iter().map(|c| c.size).sum();

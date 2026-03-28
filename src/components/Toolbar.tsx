@@ -1,12 +1,14 @@
 import { ChevronLeft, ChevronRight, HardDrive, FolderSearch } from 'lucide-react'
-import { useAppState } from '../state/context'
+import { useStore } from '../state/store'
 import { useScan } from '../hooks/useTauri'
 
 export function Toolbar() {
-  const { state, dispatch } = useAppState()
+  const currentPath = useStore(s => s.currentPath)
+  const navigateBack = useStore(s => s.navigateBack)
+  const navigateToBreadcrumb = useStore(s => s.navigateToBreadcrumb)
   const { scanFolder } = useScan()
 
-  const segments = state.currentPath
+  const segments = currentPath
   const showBack = segments.length > 0
   const maxVisible = 5
   const truncated = segments.length > maxVisible
@@ -17,7 +19,7 @@ export function Toolbar() {
     <div className="h-10 flex items-center px-3 gap-2 border-b border-[var(--color-border)] bg-[var(--color-bg-secondary)] shrink-0">
       {showBack && (
         <button
-          onClick={() => dispatch({ type: 'NAVIGATE_BACK' })}
+          onClick={navigateBack}
           className="flex items-center gap-0.5 text-sm text-[var(--color-accent)] hover:text-[var(--color-accent-hover)] transition-colors cursor-pointer shrink-0"
           aria-label="Go back"
         >
@@ -28,7 +30,7 @@ export function Toolbar() {
 
       <nav className="flex items-center gap-0.5 text-sm min-w-0 flex-1 overflow-hidden" aria-label="Breadcrumb">
         <button
-          onClick={() => dispatch({ type: 'NAVIGATE_TO_BREADCRUMB', index: 0 })}
+          onClick={() => navigateToBreadcrumb(0)}
           className="shrink-0 cursor-pointer text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] transition-colors"
           aria-label="Root directory"
         >
@@ -54,7 +56,7 @@ export function Toolbar() {
                 </span>
               ) : (
                 <button
-                  onClick={() => dispatch({ type: 'NAVIGATE_TO_BREADCRUMB', index: actualIndex })}
+                  onClick={() => navigateToBreadcrumb(actualIndex)}
                   className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] truncate cursor-pointer transition-colors"
                 >
                   {segment}

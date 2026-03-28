@@ -1,6 +1,5 @@
-import { useEffect, useReducer } from 'react'
-import { AppContext } from './state/context'
-import { appReducer, initialState } from './state/reducer'
+import { useEffect } from 'react'
+import { useStore } from './state/store'
 import { useScanEvents } from './hooks/useTauri'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { Titlebar } from './components/Titlebar'
@@ -10,10 +9,15 @@ import { FileList } from './components/FileList'
 import { DetailPanel } from './components/DetailPanel'
 import { StatusBar } from './components/StatusBar'
 import { PermissionGuide } from './components/PermissionGuide'
-import { useAppState } from './state/context'
 
-function AppContent() {
-  const { state, dispatch } = useAppState()
+export default function App() {
+  const tree = useStore(s => s.tree)
+  const showPermissionGuide = useStore(s => s.showPermissionGuide)
+  const error = useStore(s => s.error)
+  const navigateBack = useStore(s => s.navigateBack)
+  const deselectAll = useStore(s => s.deselectAll)
+  const setActive = useStore(s => s.setActive)
+  const setError = useStore(s => s.setError)
 
   // Global event listeners — always mounted, survive component swaps
   useScanEvents()
@@ -22,24 +26,24 @@ function AppContent() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
-        if (state.currentPath.length > 0) {
-          dispatch({ type: 'NAVIGATE_BACK' })
+        if (useStore.getState().currentPath.length > 0) {
+          navigateBack()
         }
       }
       if (e.key === 'Escape') {
-        dispatch({ type: 'DESELECT_ALL' })
-        dispatch({ type: 'SET_ACTIVE', path: null })
+        deselectAll()
+        setActive(null)
       }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [state.currentPath.length, dispatch])
+  }, [navigateBack, deselectAll, setActive])
 
   return (
     <div className="flex flex-col h-screen bg-[var(--color-bg-primary)]">
       <Titlebar />
-      {state.tree ? (
+      {tree ? (
         <>
           <Toolbar />
           <DiskUsageBar />
@@ -49,21 +53,21 @@ function AppContent() {
           </div>
           <StatusBar />
         </>
-      ) : state.showPermissionGuide ? (
+      ) : showPermissionGuide ? (
         <PermissionGuide />
       ) : (
         <WelcomeScreen />
       )}
 
       {/* Error toast */}
-      {state.error && (
+      {error && (
         <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[var(--color-bg-secondary)]
                         text-[var(--color-text-primary)] px-5 py-3 rounded-xl text-sm max-w-lg z-50
                         border border-[var(--color-danger)]/30 shadow-lg fade-in">
           <div className="flex items-center gap-3">
-            <span className="text-[var(--color-danger)]">{state.error}</span>
+            <span className="text-[var(--color-danger)]">{error}</span>
             <button
-              onClick={() => dispatch({ type: 'SET_ERROR', error: null })}
+              onClick={() => setError(null)}
               className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
             >
               ✕
@@ -72,15 +76,5 @@ function AppContent() {
         </div>
       )}
     </div>
-  )
-}
-
-export default function App() {
-  const [state, dispatch] = useReducer(appReducer, initialState)
-
-  return (
-    <AppContext.Provider value={{ state, dispatch }}>
-      <AppContent />
-    </AppContext.Provider>
   )
 }

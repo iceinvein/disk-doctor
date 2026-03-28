@@ -1,52 +1,57 @@
 import { useState, useMemo } from 'react'
 import { Trash2, Loader2, XCircle } from 'lucide-react'
-import { useAppState } from '../state/context'
+import { useStore } from '../state/store'
 import { getCurrentEntries, findEntry, formatSize } from '../state/helpers'
 import { useTrash, useScan } from '../hooks/useTauri'
 import { ConfirmDialog } from './ConfirmDialog'
 
 export function StatusBar() {
-  const { state } = useAppState()
+  const tree = useStore(s => s.tree)
+  const currentPath = useStore(s => s.currentPath)
+  const selectedPaths = useStore(s => s.selectedPaths)
+  const scanning = useStore(s => s.scanning)
+  const scanProgress = useStore(s => s.scanProgress)
+  const scanTime = useStore(s => s.scanTime)
   const { trashItems } = useTrash()
   const { cancelScan } = useScan()
   const [showConfirm, setShowConfirm] = useState(false)
 
-  const entries = getCurrentEntries(state.tree, state.currentPath)
+  const entries = getCurrentEntries(tree, currentPath)
   const totalSize = entries.reduce((sum, e) => sum + e.size, 0)
-  const selectedCount = state.selectedPaths.size
+  const selectedCount = selectedPaths.size
 
   const selectedSize = useMemo(() => {
     if (selectedCount === 0) return 0
     let total = 0
-    for (const path of state.selectedPaths) {
-      const entry = findEntry(state.tree, path)
+    for (const path of selectedPaths) {
+      const entry = findEntry(tree, path)
       if (entry) total += entry.size
     }
     return total
-  }, [state.selectedPaths, state.tree, selectedCount])
+  }, [selectedPaths, tree, selectedCount])
 
   async function handleBatchTrash() {
     setShowConfirm(false)
-    await trashItems(Array.from(state.selectedPaths))
+    await trashItems(Array.from(selectedPaths))
   }
 
   return (
     <div className="h-8 flex items-center justify-between px-3 border-t border-[var(--color-border)] bg-[var(--color-bg-secondary)] shrink-0">
       {/* Left: scan progress or item count */}
-      {state.scanning ? (
+      {scanning ? (
         <span className="flex items-center gap-2 text-xs text-[var(--color-accent)]">
           <Loader2 size={12} className="animate-spin" />
-          Scanning… {state.scanProgress ? `${state.scanProgress.scanned_count.toLocaleString()} items found` : ''}
+          Scanning… {scanProgress ? `${scanProgress.scanned_count.toLocaleString()} items found` : ''}
         </span>
       ) : (
         <span className="text-xs text-[var(--color-text-tertiary)]">
           {entries.length.toLocaleString()} items · {formatSize(totalSize)}
-          {state.scanTime !== null && ` · Scanned in ${state.scanTime.toFixed(1)}s`}
+          {scanTime !== null && ` · Scanned in ${scanTime.toFixed(1)}s`}
         </span>
       )}
 
       {/* Right: cancel scan, batch trash, or nothing */}
-      {state.scanning ? (
+      {scanning ? (
         <button
           onClick={cancelScan}
           className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] transition-colors cursor-pointer"

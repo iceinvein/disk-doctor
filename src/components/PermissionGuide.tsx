@@ -1,11 +1,11 @@
 import { useState } from 'react'
 import { Shield, Settings, CheckCircle2, RefreshCw, ChevronRight, ArrowLeft } from 'lucide-react'
-import { useAppState } from '../state/context'
+import { useStore } from '../state/store'
 import { checkFullDiskAccess, openFullDiskAccessSettings } from '../hooks/useTauri'
 import { useScan } from '../hooks/useTauri'
 
 export function PermissionGuide() {
-  const { dispatch } = useAppState()
+  const showPermission = useStore(s => s.showPermission)
   const { scanEntireDisk } = useScan()
   const [checking, setChecking] = useState(false)
   const [granted, setGranted] = useState(false)
@@ -23,14 +23,14 @@ export function PermissionGuide() {
       setGranted(true)
       // Brief pause to show the success state, then start scanning
       setTimeout(() => {
-        dispatch({ type: 'SHOW_PERMISSION_GUIDE', show: false })
+        showPermission(false)
         scanEntireDisk()
       }, 800)
     }
   }
 
   function handleBack() {
-    dispatch({ type: 'SHOW_PERMISSION_GUIDE', show: false })
+    showPermission(false)
   }
 
   if (granted) {

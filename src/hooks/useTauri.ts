@@ -1,7 +1,7 @@
 import { useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import { useAppState } from '../state/context'
+import { useStore } from '../state/store'
 import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
 
 /**
@@ -9,19 +9,17 @@ import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
  * Call this ONCE at the App level so listeners survive component swaps.
  */
 export function useScanEvents() {
-  const { dispatch } = useAppState()
-
   useEffect(() => {
     const unlistenProgress = listen<ScanProgress>('scan-progress', (event) => {
-      dispatch({ type: 'SET_SCAN_PROGRESS', progress: event.payload })
+      useStore.getState().setScanProgress(event.payload)
     })
 
     const unlistenDiscovered = listen<DirEntry[]>('scan-entries-discovered', (event) => {
-      dispatch({ type: 'SET_DISCOVERED_ENTRIES', entries: event.payload })
+      useStore.getState().setDiscoveredEntries(event.payload)
     })
 
     const unlistenUpdated = listen<DirEntry>('scan-entry-updated', (event) => {
-      dispatch({ type: 'UPDATE_SCANNED_ENTRY', entry: event.payload })
+      useStore.getState().updateScannedEntry(event.payload)
     })
 
     return () => {
@@ -29,11 +27,15 @@ export function useScanEvents() {
       unlistenDiscovered.then((fn) => fn())
       unlistenUpdated.then((fn) => fn())
     }
-  }, [dispatch])
+  }, [])
 }
 
 export function useScan() {
-  const { dispatch } = useAppState()
+  const initScan = useStore(s => s.initScan)
+  const setTree = useStore(s => s.setTree)
+  const setError = useStore(s => s.setError)
+  const setScanning = useStore(s => s.setScanning)
+  const showPermission = useStore(s => s.showPermission)
 
   const scanFolder = useCallback(async () => {
     try {
@@ -41,58 +43,53 @@ export function useScan() {
       if (!path) return
 
       const name = path.split('/').filter(Boolean).pop() ?? path
-      dispatch({ type: 'INIT_SCAN', rootPath: path, rootName: name })
+      initScan(path, name)
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path })
       const scanTime = (performance.now() - start) / 1000
 
-      dispatch({ type: 'SET_TREE', tree, scanTime })
+      setTree(tree, scanTime)
     } catch (error) {
-      dispatch({
-        type: 'SET_ERROR',
-        error: error instanceof Error ? error.message : String(error),
-      })
+      setError(error instanceof Error ? error.message : String(error))
     }
-  }, [dispatch])
+  }, [initScan, setTree, setError])
 
   const scanEntireDisk = useCallback(async () => {
     try {
       const hasAccess = await invoke<boolean>('check_full_disk_access')
       if (!hasAccess) {
-        dispatch({ type: 'SHOW_PERMISSION_GUIDE', show: true })
+        showPermission(true)
         return
       }
 
-      dispatch({ type: 'INIT_SCAN', rootPath: '/', rootName: 'Macintosh HD' })
+      initScan('/', 'Macintosh HD')
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path: '/' })
       const scanTime = (performance.now() - start) / 1000
 
-      dispatch({ type: 'SET_TREE', tree, scanTime })
+      setTree(tree, scanTime)
     } catch (error) {
-      dispatch({
-        type: 'SET_ERROR',
-        error: error instanceof Error ? error.message : String(error),
-      })
+      setError(error instanceof Error ? error.message : String(error))
     }
-  }, [dispatch])
+  }, [initScan, setTree, setError, showPermission])
 
   const cancelScan = useCallback(async () => {
     try {
       await invoke('cancel_scan')
-      dispatch({ type: 'SET_SCANNING', scanning: false })
+      setScanning(false)
     } catch {
       // Ignore cancel errors
     }
-  }, [dispatch])
+  }, [setScanning])
 
   return { scanFolder, scanEntireDisk, cancelScan }
 }
 
 export function useTrash() {
-  const { dispatch } = useAppState()
+  const removePaths = useStore(s => s.removePaths)
+  const setError = useStore(s => s.setError)
 
   const trashItems = useCallback(
     async (paths: string[]): Promise<string[]> => {
@@ -102,19 +99,16 @@ export function useTrash() {
         const succeeded = paths.filter((p) => !failedSet.has(p))
 
         if (succeeded.length > 0) {
-          dispatch({ type: 'REMOVE_PATHS', paths: succeeded })
+          removePaths(succeeded)
         }
 
         return failed
       } catch (error) {
-        dispatch({
-          type: 'SET_ERROR',
-          error: error instanceof Error ? error.message : String(error),
-        })
+        setError(error instanceof Error ? error.message : String(error))
         return paths
       }
     },
-    [dispatch],
+    [removePaths, setError],
   )
 
   return { trashItems }

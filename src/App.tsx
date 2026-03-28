@@ -8,7 +8,6 @@ import { DiskUsageBar } from './components/DiskUsageBar'
 import { FileList } from './components/FileList'
 import { DetailPanel } from './components/DetailPanel'
 import { StatusBar } from './components/StatusBar'
-import { ScanModal } from './components/ScanModal'
 import { PermissionGuide } from './components/PermissionGuide'
 
 export default function App() {
@@ -51,8 +50,6 @@ export default function App() {
         ) : (
           <WelcomeScreen />
         )}
-        {state.scanning && <ScanModal />}
-
         {/* Error toast */}
         {state.error && (
           <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[var(--color-bg-secondary)]

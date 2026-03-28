@@ -2,7 +2,7 @@ use crate::types::{DirEntry, DiskUsage, ScanProgress};
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Instant, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
@@ -17,22 +17,143 @@ struct FlatEntry {
     is_restricted: bool,
 }
 
-/// Scan a directory tree and return a nested `DirEntry`.
-///
-/// Emits `scan-progress` events via `app_handle` roughly every 100 ms.
-/// Respects the `cancelled` flag — stops walking when it is set to `true`.
+/// Scan a directory tree, emitting each top-level child as a `scan-entry` event
+/// as soon as it's fully scanned. This allows the frontend to show results
+/// incrementally instead of waiting for the entire scan to complete.
 pub fn scan_directory(
     root: &str,
     app_handle: &AppHandle,
     cancelled: Arc<AtomicBool>,
 ) -> Result<DirEntry, String> {
-    let mut entries: Vec<FlatEntry> = Vec::new();
+    let root_path = std::path::Path::new(root);
+    if !root_path.exists() {
+        return Err(format!("Path does not exist: {}", root));
+    }
+
+    let root_name = root_path
+        .file_name()
+        .unwrap_or(root_path.as_os_str())
+        .to_string_lossy()
+        .to_string();
+
+    let root_modified = std::fs::metadata(root_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
+        .unwrap_or(0);
+
+    // Read immediate children of root
+    let read_dir = std::fs::read_dir(root_path).map_err(|e| e.to_string())?;
+
+    let mut children: Vec<DirEntry> = Vec::new();
     let mut scanned_count: u32 = 0;
     let mut last_emit = Instant::now();
 
+    for dir_entry_result in read_dir {
+        if cancelled.load(Ordering::Relaxed) {
+            break;
+        }
+
+        let dir_entry = match dir_entry_result {
+            Ok(e) => e,
+            Err(_) => continue,
+        };
+
+        let child_path = dir_entry.path();
+        let child_path_str = child_path.to_string_lossy().to_string();
+        let child_name = dir_entry.file_name().to_string_lossy().to_string();
+
+        let ft = dir_entry.file_type().ok();
+        let is_symlink = ft.map(|f| f.is_symlink()).unwrap_or(false);
+        let is_dir = ft.map(|f| f.is_dir()).unwrap_or(false);
+
+        let child_entry = if is_dir && !is_symlink {
+            // Recursively scan this child directory
+            scan_subtree(
+                &child_path_str,
+                &cancelled,
+                &mut scanned_count,
+                app_handle,
+                &mut last_emit,
+            )
+        } else {
+            // File or symlink — just get metadata
+            let meta = dir_entry.metadata().ok();
+            let size = if is_symlink {
+                0
+            } else {
+                meta.as_ref().map(|m| m.len()).unwrap_or(0)
+            };
+            let modified = meta
+                .as_ref()
+                .and_then(|m| m.modified().ok())
+                .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
+                .unwrap_or(0);
+            let is_restricted = meta.is_none();
+
+            scanned_count += 1;
+
+            DirEntry {
+                path: child_path_str,
+                name: child_name,
+                size,
+                is_dir: false,
+                child_count: 0,
+                modified,
+                is_symlink,
+                is_restricted,
+                children: vec![],
+            }
+        };
+
+        // Emit this child to the frontend for live display
+        let _ = app_handle.emit("scan-entry", &child_entry);
+
+        children.push(child_entry);
+    }
+
+    // Final progress event
+    let _ = app_handle.emit(
+        "scan-progress",
+        ScanProgress {
+            scanned_count,
+            current_path: root.to_string(),
+        },
+    );
+
+    // Sort children by size descending
+    children.sort_by(|a, b| b.size.cmp(&a.size));
+
+    let total_size: u64 = children.iter().map(|c| c.size).sum();
+
+    Ok(DirEntry {
+        path: root.to_string(),
+        name: root_name,
+        size: total_size,
+        is_dir: true,
+        child_count: children.len() as u32,
+        modified: root_modified,
+        is_symlink: false,
+        is_restricted: false,
+        children,
+    })
+}
+
+/// Scan a subtree using walkdir — collects all entries flat, then builds
+/// the nested tree structure. Emits progress events but not scan-entry events
+/// (those are only for top-level children).
+fn scan_subtree(
+    root: &str,
+    cancelled: &Arc<AtomicBool>,
+    scanned_count: &mut u32,
+    app_handle: &AppHandle,
+    last_emit: &mut Instant,
+) -> DirEntry {
+    let mut entries: Vec<FlatEntry> = Vec::new();
+
     for entry in WalkDir::new(root).follow_links(false) {
         if cancelled.load(Ordering::Relaxed) {
-            return Err("Scan cancelled".into());
+            break;
         }
 
         let entry = match entry {
@@ -42,17 +163,12 @@ pub fn scan_directory(
 
         let path_str = entry.path().to_string_lossy().to_string();
 
-        // Gather metadata — handle errors gracefully.
         let (size, modified, is_symlink, is_restricted) = match entry.metadata() {
             Ok(meta) => {
                 let size = if meta.is_file() { meta.len() } else { 0 };
                 let modified = meta
                     .modified()
-                    .map(|t| {
-                        t.duration_since(std::time::UNIX_EPOCH)
-                            .unwrap_or_default()
-                            .as_secs() as i64
-                    })
+                    .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
                     .unwrap_or(0);
                 let is_symlink = entry.path_is_symlink();
                 (size, modified, is_symlink, false)
@@ -60,15 +176,8 @@ pub fn scan_directory(
             Err(_) => (0, 0, entry.path_is_symlink(), true),
         };
 
-        let name = entry
-            .file_name()
-            .to_string_lossy()
-            .to_string();
-
+        let name = entry.file_name().to_string_lossy().to_string();
         let is_dir = entry.file_type().is_dir();
-
-        // Clone path for progress event *before* moving into entries vec.
-        let progress_path = path_str.clone();
 
         entries.push(FlatEntry {
             path: path_str,
@@ -80,52 +189,59 @@ pub fn scan_directory(
             is_restricted,
         });
 
-        scanned_count += 1;
+        *scanned_count += 1;
 
-        // Throttle progress events to ~every 100 ms.
+        // Throttle progress events to ~every 100ms
         if last_emit.elapsed().as_millis() >= 100 {
+            let progress_path = entry.path().to_string_lossy().to_string();
             let _ = app_handle.emit(
                 "scan-progress",
                 ScanProgress {
-                    scanned_count,
+                    scanned_count: *scanned_count,
                     current_path: progress_path,
                 },
             );
-            last_emit = Instant::now();
+            *last_emit = Instant::now();
         }
     }
 
-    // Final progress event so the UI knows we finished walking.
-    let _ = app_handle.emit(
-        "scan-progress",
-        ScanProgress {
-            scanned_count,
-            current_path: root.to_string(),
-        },
-    );
-
-    build_tree(root, entries)
+    // Build tree from flat entries
+    match build_tree(root, entries) {
+        Ok(tree) => tree,
+        Err(_) => {
+            // Fallback: return an empty directory entry
+            let name = std::path::Path::new(root)
+                .file_name()
+                .unwrap_or(std::ffi::OsStr::new(root))
+                .to_string_lossy()
+                .to_string();
+            DirEntry {
+                path: root.to_string(),
+                name,
+                size: 0,
+                is_dir: true,
+                child_count: 0,
+                modified: 0,
+                is_symlink: false,
+                is_restricted: true,
+                children: vec![],
+            }
+        }
+    }
 }
 
 /// Build a nested `DirEntry` tree from a flat list of entries.
-///
-/// Strategy:
-///  1. Index every entry by its path.
-///  2. Build a parent → children index mapping.
-///  3. Recursively construct `DirEntry` nodes bottom-up, propagating sizes.
 fn build_tree(root: &str, entries: Vec<FlatEntry>) -> Result<DirEntry, String> {
     if entries.is_empty() {
         return Err("No entries found".into());
     }
 
-    // Map path → index for quick lookup.
     let path_to_idx: HashMap<&str, usize> = entries
         .iter()
         .enumerate()
         .map(|(i, e)| (e.path.as_str(), i))
         .collect();
 
-    // Map parent path → list of child indices.
     let mut children_map: HashMap<usize, Vec<usize>> = HashMap::new();
 
     for (i, entry) in entries.iter().enumerate() {
@@ -133,16 +249,12 @@ fn build_tree(root: &str, entries: Vec<FlatEntry>) -> Result<DirEntry, String> {
             let parent_str = parent.to_string_lossy();
             if let Some(&parent_idx) = path_to_idx.get(parent_str.as_ref()) {
                 if parent_idx != i {
-                    children_map
-                        .entry(parent_idx)
-                        .or_default()
-                        .push(i);
+                    children_map.entry(parent_idx).or_default().push(i);
                 }
             }
         }
     }
 
-    // Recursively build DirEntry nodes.
     fn build_node(
         idx: usize,
         entries: &[FlatEntry],
@@ -158,7 +270,6 @@ fn build_tree(root: &str, entries: Vec<FlatEntry>) -> Result<DirEntry, String> {
                 size += child.size;
                 children.push(child);
             }
-            // Sort children by size descending.
             children.sort_by(|a, b| b.size.cmp(&a.size));
         }
 
@@ -177,7 +288,6 @@ fn build_tree(root: &str, entries: Vec<FlatEntry>) -> Result<DirEntry, String> {
         }
     }
 
-    // Find the root index.
     let root_idx = path_to_idx
         .get(root)
         .copied()
@@ -201,8 +311,7 @@ pub fn get_disk_usage(path: &str) -> Result<DiskUsage, String> {
     use std::ffi::CString;
     use std::mem::MaybeUninit;
 
-    let c_path =
-        CString::new(path).map_err(|e| format!("Invalid path: {}", e))?;
+    let c_path = CString::new(path).map_err(|e| format!("Invalid path: {}", e))?;
 
     let mut stat = MaybeUninit::<libc::statvfs>::uninit();
 

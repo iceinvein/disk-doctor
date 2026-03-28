@@ -39,6 +39,46 @@ export function appReducer(state: AppState, action: Action): AppState {
         scanProgress: action.progress,
       }
 
+    case 'INIT_SCAN':
+      return {
+        ...state,
+        tree: {
+          path: action.rootPath,
+          name: action.rootName,
+          size: 0,
+          is_dir: true,
+          child_count: 0,
+          modified: 0,
+          is_symlink: false,
+          is_restricted: false,
+          children: [],
+        },
+        scanning: true,
+        scanProgress: null,
+        scanTime: null,
+        currentPath: [],
+        selectedPaths: new Set(),
+        activePath: null,
+        error: null,
+        showPermissionGuide: false,
+      }
+
+    case 'ADD_SCANNED_ENTRY': {
+      if (!state.tree) return state
+      const newChildren = [...state.tree.children, action.entry]
+      newChildren.sort((a, b) => b.size - a.size)
+      const newSize = newChildren.reduce((sum, c) => sum + c.size, 0)
+      return {
+        ...state,
+        tree: {
+          ...state.tree,
+          children: newChildren,
+          child_count: newChildren.length,
+          size: newSize,
+        },
+      }
+    }
+
     case 'NAVIGATE_INTO':
       return {
         ...state,

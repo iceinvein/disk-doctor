@@ -42,6 +42,8 @@ export type Action =
   | { type: 'SET_TREE'; tree: DirEntry; scanTime: number }
   | { type: 'SET_SCANNING'; scanning: boolean }
   | { type: 'SET_SCAN_PROGRESS'; progress: ScanProgress }
+  | { type: 'INIT_SCAN'; rootPath: string; rootName: string }
+  | { type: 'ADD_SCANNED_ENTRY'; entry: DirEntry }
   | { type: 'NAVIGATE_INTO'; folderName: string }
   | { type: 'NAVIGATE_TO_BREADCRUMB'; index: number }
   | { type: 'NAVIGATE_BACK' }

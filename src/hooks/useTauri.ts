@@ -8,12 +8,17 @@ export function useScan() {
   const { dispatch } = useAppState()
 
   useEffect(() => {
-    const unlisten = listen<ScanProgress>('scan-progress', (event) => {
+    const unlistenProgress = listen<ScanProgress>('scan-progress', (event) => {
       dispatch({ type: 'SET_SCAN_PROGRESS', progress: event.payload })
     })
 
+    const unlistenEntry = listen<DirEntry>('scan-entry', (event) => {
+      dispatch({ type: 'ADD_SCANNED_ENTRY', entry: event.payload })
+    })
+
     return () => {
-      unlisten.then((fn) => fn())
+      unlistenProgress.then((fn) => fn())
+      unlistenEntry.then((fn) => fn())
     }
   }, [dispatch])
 
@@ -22,7 +27,8 @@ export function useScan() {
       const path = await invoke<string | null>('pick_folder')
       if (!path) return
 
-      dispatch({ type: 'SET_SCANNING', scanning: true })
+      const name = path.split('/').filter(Boolean).pop() ?? path
+      dispatch({ type: 'INIT_SCAN', rootPath: path, rootName: name })
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path })
@@ -45,7 +51,7 @@ export function useScan() {
         return
       }
 
-      dispatch({ type: 'SET_SCANNING', scanning: true })
+      dispatch({ type: 'INIT_SCAN', rootPath: '/', rootName: 'Macintosh HD' })
 
       const start = performance.now()
       const tree = await invoke<DirEntry>('scan_directory', { path: '/' })

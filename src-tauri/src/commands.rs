@@ -9,6 +9,7 @@ use tauri::{AppHandle, State};
 
 pub struct ScanState {
     pub cancelled: Arc<AtomicBool>,
+    pub scanning: Arc<AtomicBool>,
     pub db: Arc<Mutex<Connection>>,         // Write connection (walkers)
     pub read_db: Arc<Mutex<Connection>>,    // Read connection (queries — no lock contention in WAL)
     pub current_scan_id: Arc<Mutex<Option<i64>>>,
@@ -25,6 +26,7 @@ impl ScanState {
 
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
+            scanning: Arc::new(AtomicBool::new(false)),
             db: Arc::new(Mutex::new(conn)),
             read_db: Arc::new(Mutex::new(read_conn)),
             current_scan_id: Arc::new(Mutex::new(None)),
@@ -48,11 +50,12 @@ pub async fn scan_directory(
     app: AppHandle,
     scan_state: State<'_, Mutex<ScanState>>,
 ) -> Result<(), String> {
-    let (cancelled, db, scan_id, view_path) = {
+    let (cancelled, _scanning, db, scan_id, view_path) = {
         let state = scan_state
             .lock()
             .map_err(|e| format!("Failed to lock scan state: {}", e))?;
         state.cancelled.store(false, Ordering::Relaxed);
+        state.scanning.store(true, Ordering::Relaxed);
         // Set initial view path to scan root
         *state.view_path.lock().unwrap() = path.clone();
 
@@ -73,6 +76,7 @@ pub async fn scan_directory(
 
         (
             Arc::clone(&state.cancelled),
+            Arc::clone(&state.scanning),
             Arc::clone(&state.db),
             scan_id,
             Arc::clone(&state.view_path),
@@ -81,17 +85,25 @@ pub async fn scan_directory(
 
     let handle = app.clone();
 
-    tauri::async_runtime::spawn_blocking(move || {
+    let result = tauri::async_runtime::spawn_blocking(move || {
         scanner::scan_directory(&path, &handle, cancelled, db, scan_id, view_path)
     })
     .await
-    .map_err(|e| format!("Scan task failed: {}", e))?
+    .map_err(|e| format!("Scan task failed: {}", e))?;
+
+    // Clear scanning flag regardless of success/failure
+    if let Ok(state) = scan_state.lock() {
+        state.scanning.store(false, Ordering::Relaxed);
+    }
+
+    result
 }
 
 #[tauri::command]
 pub fn cancel_scan(scan_state: State<'_, Mutex<ScanState>>) {
     if let Ok(state) = scan_state.lock() {
         state.cancelled.store(true, Ordering::Relaxed);
+        state.scanning.store(false, Ordering::Relaxed);
     }
 }
 
@@ -104,39 +116,59 @@ pub fn set_view_path(path: String, scan_state: State<'_, Mutex<ScanState>>) {
 }
 
 #[tauri::command]
-pub fn get_children(
+pub async fn get_children(
     path: String,
     scan_state: State<'_, Mutex<ScanState>>,
 ) -> Result<ViewUpdate, String> {
-    let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let scan_id = state
-        .current_scan_id
-        .lock()
-        .unwrap()
-        .ok_or("No active scan")?;
-    let conn = state.read_db.lock().map_err(|e| e.to_string())?;
-
-    // Always use live-computed sizes so navigation shows accurate bars
-    // (during scan: directories sum their subtrees; after scan: stored sizes are already correct)
-    let (entries, live_parent_size) =
-        db::get_children_with_live_sizes(&conn, scan_id, &path).map_err(|e| format!("DB error: {}", e))?;
-    let parent = db::get_entry(&conn, scan_id, &path)
-        .map_err(|e| format!("DB error: {}", e))?;
-
-    let (parent_path, parent_size, parent_name) = match &parent {
-        Some(p) => (p.path.clone(), live_parent_size, p.name.clone()),
-        None => (path.clone(), live_parent_size, String::new()),
+    let (read_db, scan_id, is_scanning) = {
+        let state = scan_state.lock().map_err(|e| e.to_string())?;
+        let scan_id = state
+            .current_scan_id
+            .lock()
+            .unwrap()
+            .ok_or("No active scan")?;
+        (
+            Arc::clone(&state.read_db),
+            scan_id,
+            state.scanning.load(Ordering::Relaxed),
+        )
     };
 
-    log!(Cmd, "get_children({}) → {} entries, parent_size={}", path, entries.len(), parent_size);
+    tauri::async_runtime::spawn_blocking(move || {
+        let conn = read_db.lock().map_err(|e| e.to_string())?;
 
-    Ok(ViewUpdate {
-        entries,
-        parent_path,
-        parent_size,
-        parent_name,
-        total_scanned: 0,
+        let (entries, parent_size) = if is_scanning {
+            // During scan: compute live sizes (directories may not have final sizes yet)
+            db::get_children_with_live_sizes(&conn, scan_id, &path)
+                .map_err(|e| format!("DB error: {}", e))?
+        } else {
+            // After scan: stored sizes are accurate (compute_folder_sizes already ran)
+            let entries = db::get_children(&conn, scan_id, &path)
+                .map_err(|e| format!("DB error: {}", e))?;
+            let total: u64 = entries.iter().map(|e| e.size).sum();
+            (entries, total)
+        };
+
+        let parent = db::get_entry(&conn, scan_id, &path)
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        let (parent_path, parent_size, parent_name) = match &parent {
+            Some(p) => (p.path.clone(), parent_size, p.name.clone()),
+            None => (path.clone(), parent_size, String::new()),
+        };
+
+        log!(Cmd, "get_children({}) → {} entries, parent_size={}, live={}", path, entries.len(), parent_size, is_scanning);
+
+        Ok(ViewUpdate {
+            entries,
+            parent_path,
+            parent_size,
+            parent_name,
+            total_scanned: 0,
+        })
     })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
 }
 
 #[tauri::command]

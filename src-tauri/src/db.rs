@@ -64,6 +64,7 @@ pub fn init_db(conn: &Connection) -> rusqlite::Result<()> {
         );
 
         CREATE INDEX IF NOT EXISTS idx_entries_parent ON entries(scan_id, parent_path);
+        CREATE INDEX IF NOT EXISTS idx_entries_path_dir ON entries(scan_id, is_dir, path);
     ",
     )?;
     Ok(())

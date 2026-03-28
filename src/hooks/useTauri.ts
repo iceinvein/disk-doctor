@@ -10,17 +10,34 @@ import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
  */
 export function useScanEvents() {
   useEffect(() => {
+    // Throttle tree updates to animation frames to prevent React jank.
+    // Multiple scan-tree-update events between frames → only the latest is applied.
+    let pendingTree: DirEntry | null = null
+    let rafId: number | null = null
+
+    function flushTree() {
+      if (pendingTree) {
+        useStore.getState().updateTree(pendingTree)
+        pendingTree = null
+      }
+      rafId = null
+    }
+
     const unlistenProgress = listen<ScanProgress>('scan-progress', (event) => {
       useStore.getState().setScanProgress(event.payload)
     })
 
     const unlistenTree = listen<DirEntry>('scan-tree-update', (event) => {
-      useStore.getState().updateTree(event.payload)
+      pendingTree = event.payload
+      if (rafId === null) {
+        rafId = requestAnimationFrame(flushTree)
+      }
     })
 
     return () => {
       unlistenProgress.then((fn) => fn())
       unlistenTree.then((fn) => fn())
+      if (rafId !== null) cancelAnimationFrame(rafId)
     }
   }, [])
 }

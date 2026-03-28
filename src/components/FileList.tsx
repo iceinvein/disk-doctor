@@ -18,15 +18,14 @@ export function FileList() {
   const setSort = useStore(s => s.setSort)
   const parentRef = useRef<HTMLDivElement>(null)
 
-  const entries = useMemo(
-    () =>
-      sortEntries(
-        getCurrentEntries(tree, currentPath),
-        sortBy,
-        sortDir,
-      ),
-    [tree, currentPath, sortBy, sortDir],
-  )
+  const scanning = useStore(s => s.scanning)
+
+  const entries = useMemo(() => {
+    const current = getCurrentEntries(tree, currentPath)
+    // Skip client-side sort during scanning — Rust already sorts by size desc
+    if (scanning) return current
+    return sortEntries(current, sortBy, sortDir)
+  }, [tree, currentPath, sortBy, sortDir, scanning])
 
   const maxSize = useMemo(
     () => entries.reduce((max, e) => Math.max(max, e.size), 0),

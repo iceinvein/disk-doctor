@@ -1,4 +1,5 @@
-import { Folder, File, FileText, Image, Music, Archive, Link, Lock, Download, BookOpen, Monitor, FileCode, type LucideIcon } from 'lucide-react'
+import { Folder, File, FileText, Image, Music, Archive, Link, Lock, Download, BookOpen, Monitor, FileCode } from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import type { DirEntry } from '../state/types'
 import { formatSize } from '../state/helpers'
 

@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../state/store'
-import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment, SavedScanMeta } from '../state/types'
+import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment, ScanMeta } from '../state/types'
 
 /**
  * Set up Tauri event listeners for scan streaming.
@@ -65,14 +65,11 @@ export function useScan() {
       initScan(path, name)
 
       const start = performance.now()
-      await invoke<DirEntry>('scan_directory', { path })
+      await invoke('scan_directory', { path })
       const scanTime = (performance.now() - start) / 1000
 
       console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
       setScanComplete(scanTime)
-
-      // Auto-save for next launch
-      invoke('save_scan', { rootPath: path, rootName: name, scanTime }).catch(console.error)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
@@ -89,14 +86,11 @@ export function useScan() {
       initScan('/', 'Macintosh HD')
 
       const start = performance.now()
-      await invoke<DirEntry>('scan_directory', { path: '/' })
+      await invoke('scan_directory', { path: '/' })
       const scanTime = (performance.now() - start) / 1000
 
       console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
       setScanComplete(scanTime)
-
-      // Auto-save for next launch
-      invoke('save_scan', { rootPath: '/', rootName: 'Macintosh HD', scanTime }).catch(console.error)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
@@ -212,6 +206,10 @@ export async function getDiskUsage(path: string): Promise<DiskUsage> {
   return invoke<DiskUsage>('get_disk_usage', { path })
 }
 
-export async function loadSavedScan(): Promise<SavedScanMeta | null> {
-  return invoke<SavedScanMeta | null>('load_saved_scan')
+export async function getLatestScan(): Promise<ScanMeta | null> {
+  return invoke<ScanMeta | null>('get_latest_scan')
+}
+
+export async function loadScan(scanId: number): Promise<ScanMeta> {
+  return invoke<ScanMeta>('load_scan', { scanId })
 }

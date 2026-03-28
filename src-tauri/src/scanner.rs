@@ -1,66 +1,27 @@
-use crate::types::{DirEntry, DiskUsage, ScanProgress, ViewUpdate};
+use crate::db;
+use crate::types::{DiskUsage, ScanProgress, ViewUpdate};
 use rayon::prelude::*;
-use std::collections::HashMap;
+use rusqlite::Connection;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
-struct FlatEntry {
-    path: String,
-    name: String,
-    size: u64,
-    is_dir: bool,
-    modified: i64,
-    is_symlink: bool,
-    is_restricted: bool,
-}
-
-/// Find a node in the tree by its path (recursive DFS).
-pub fn find_node<'a>(tree: &'a DirEntry, path: &str) -> Option<&'a DirEntry> {
-    if tree.path == path {
-        return Some(tree);
-    }
-    for child in &tree.children {
-        if let Some(found) = find_node(child, path) {
-            return Some(found);
-        }
-    }
-    None
-}
-
-/// Extract shallow children (children with empty children) from a node.
-fn shallow_children(node: &DirEntry) -> Vec<DirEntry> {
-    node.children
-        .iter()
-        .map(|c| DirEntry {
-            path: c.path.clone(),
-            name: c.name.clone(),
-            size: c.size,
-            is_dir: c.is_dir,
-            child_count: c.child_count,
-            modified: c.modified,
-            is_symlink: c.is_symlink,
-            is_restricted: c.is_restricted,
-            children: vec![], // Don't send nested children
-        })
-        .collect()
-}
-
-/// Parallel scan with view-based streaming.
+/// Parallel scan that writes entries to SQLite in batches.
 ///
-/// All parallel walkers push flat entries into a shared Vec. A dedicated
-/// emitter thread periodically builds a tree snapshot from ALL entries
-/// collected so far, stores it in tree_state, then extracts the children
-/// at the current view_path and emits a lightweight `view-update` event.
+/// All parallel walkers flush entries to the DB periodically. A dedicated
+/// emitter thread queries the DB for the current view_path and emits
+/// lightweight `view-update` events. After all walkers complete,
+/// folder sizes are computed bottom-up and the scan is finalized.
 pub fn scan_directory(
     root: &str,
     app_handle: &AppHandle,
     cancelled: Arc<AtomicBool>,
-    tree_state: Arc<Mutex<Option<DirEntry>>>,
+    db: Arc<Mutex<Connection>>,
+    scan_id: i64,
     view_path: Arc<Mutex<String>>,
-) -> Result<DirEntry, String> {
+) -> Result<(), String> {
     let root_path = std::path::Path::new(root);
     if !root_path.exists() {
         return Err(format!("Path does not exist: {}", root));
@@ -69,12 +30,10 @@ pub fn scan_directory(
     eprintln!("[scan] starting parallel scan of: {}", root);
     let scan_start = Instant::now();
 
-    // Shared flat entry storage — all threads push here
-    let entries: Arc<Mutex<Vec<FlatEntry>>> = Arc::new(Mutex::new(Vec::new()));
     let scanned_count = Arc::new(AtomicU32::new(0));
     let done = Arc::new(AtomicBool::new(false));
 
-    // Add root entry first (build_tree needs it)
+    // Add root entry first
     let root_modified = std::fs::metadata(root_path)
         .ok()
         .and_then(|m| m.modified().ok())
@@ -86,22 +45,32 @@ pub fn scan_directory(
         .to_string_lossy()
         .to_string();
 
+    // Root entry has empty parent_path
     {
-        let mut e = entries.lock().unwrap();
-        e.push(FlatEntry {
-            path: root.to_string(),
-            name: root_name,
-            size: 0,
-            is_dir: true,
-            modified: root_modified,
-            is_symlink: false,
-            is_restricted: false,
-        });
+        let conn = db.lock().unwrap();
+        db::insert_entries(
+            &conn,
+            scan_id,
+            &[(
+                root.to_string(),
+                String::new(), // parent_path = "" for root
+                root_name,
+                0,
+                true,
+                0,
+                root_modified,
+                false,
+                false,
+            )],
+        )
+        .map_err(|e| format!("Failed to insert root entry: {}", e))?;
     }
 
     // Discover immediate children for parallel dispatch
     let mut child_dirs: Vec<String> = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(root_path) {
+        let mut batch: Vec<(String, String, String, u64, bool, u32, i64, bool, bool)> = Vec::new();
+
         for dir_entry_result in read_dir {
             if cancelled.load(Ordering::Relaxed) {
                 break;
@@ -130,24 +99,29 @@ pub fn scan_directory(
                 .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
                 .unwrap_or(0);
 
-            // Add to shared entries immediately
-            {
-                let mut e = entries.lock().unwrap();
-                e.push(FlatEntry {
-                    path: child_path_str.clone(),
-                    name: child_name,
-                    size,
-                    is_dir,
-                    modified,
-                    is_symlink,
-                    is_restricted: !is_symlink && meta.is_none(),
-                });
-            }
+            batch.push((
+                child_path_str.clone(),
+                root.to_string(), // parent is the root
+                child_name,
+                size,
+                is_dir,
+                0,
+                modified,
+                is_symlink,
+                !is_symlink && meta.is_none(),
+            ));
             scanned_count.fetch_add(1, Ordering::Relaxed);
 
             if is_dir && !is_symlink {
                 child_dirs.push(child_path_str);
             }
+        }
+
+        // Flush top-level children to DB
+        if !batch.is_empty() {
+            let conn = db.lock().unwrap();
+            db::insert_entries(&conn, scan_id, &batch)
+                .map_err(|e| format!("Failed to insert top-level entries: {}", e))?;
         }
     }
 
@@ -157,15 +131,13 @@ pub fn scan_directory(
         scanned_count.load(Ordering::Relaxed)
     );
 
-    // --- Emitter thread: periodically builds tree, stores it, emits view-update ---
+    // --- Emitter thread: periodically queries DB, emits view-update ---
     let emitter_handle = {
-        let entries = entries.clone();
         let done = done.clone();
         let cancelled = cancelled.clone();
         let scanned_count = scanned_count.clone();
         let app_handle = app_handle.clone();
-        let root_str = root.to_string();
-        let tree_state = tree_state.clone();
+        let db = db.clone();
         let view_path = view_path.clone();
 
         std::thread::spawn(move || {
@@ -180,51 +152,43 @@ pub fn scan_directory(
                     break;
                 }
 
-                // Build tree from current entries (holds lock during build)
-                let tree = {
-                    let e = entries.lock().unwrap();
-                    build_tree(&root_str, &e)
+                let vp = view_path.lock().unwrap().clone();
+
+                let conn = db.lock().unwrap();
+                let entries = match db::get_children(&conn, scan_id, &vp) {
+                    Ok(e) => e,
+                    Err(_) => continue,
+                };
+                let parent = db::get_entry(&conn, scan_id, &vp).ok().flatten();
+                drop(conn); // Release lock before emitting
+
+                let (parent_path, parent_size, parent_name) = match &parent {
+                    Some(p) => (p.path.clone(), p.size, p.name.clone()),
+                    None => (vp.clone(), 0, String::new()),
                 };
 
-                if let Ok(tree) = tree {
-                    // Store tree for get_children to use
-                    *tree_state.lock().unwrap() = Some(tree.clone());
+                emit_count += 1;
+                let count = scanned_count.load(Ordering::Relaxed);
+                eprintln!(
+                    "[scan] emit view-update #{}: {} entries at '{}', {} total items, interval={}ms",
+                    emit_count,
+                    entries.len(),
+                    parent_name,
+                    count,
+                    interval
+                );
 
-                    // Get current view path
-                    let vp = view_path.lock().unwrap().clone();
-                    let view_node = if vp.is_empty() {
-                        &tree
-                    } else {
-                        find_node(&tree, &vp).unwrap_or(&tree)
-                    };
+                let update = ViewUpdate {
+                    entries,
+                    parent_path,
+                    parent_size,
+                    parent_name,
+                    total_scanned: count,
+                };
 
-                    // Extract shallow children
-                    let shallow_entries = shallow_children(view_node);
-                    let count = scanned_count.load(Ordering::Relaxed);
-
-                    emit_count += 1;
-                    eprintln!(
-                        "[scan] emit view-update #{}: {} entries at '{}', {} total items, interval={}ms",
-                        emit_count,
-                        shallow_entries.len(),
-                        view_node.name,
-                        count,
-                        interval
-                    );
-
-                    let update = ViewUpdate {
-                        entries: shallow_entries,
-                        parent_path: view_node.path.clone(),
-                        parent_size: view_node.size,
-                        parent_name: view_node.name.clone(),
-                        total_scanned: count,
-                    };
-
-                    let _ = app_handle.emit("view-update", &update);
-                }
+                let _ = app_handle.emit("view-update", &update);
 
                 // Also emit progress
-                let count = scanned_count.load(Ordering::Relaxed);
                 let _ = app_handle.emit(
                     "scan-progress",
                     ScanProgress {
@@ -236,13 +200,14 @@ pub fn scan_directory(
         })
     };
 
-    // --- Parallel walkers: scan each child dir, flush to shared entries ---
+    // --- Parallel walkers: scan each child dir, flush to DB in batches ---
     child_dirs.par_iter().for_each(|dir_path| {
         if cancelled.load(Ordering::Relaxed) {
             return;
         }
 
-        let mut local_buf: Vec<FlatEntry> = Vec::new();
+        let mut local_buf: Vec<(String, String, String, u64, bool, u32, i64, bool, bool)> =
+            Vec::new();
         let mut local_count: u32 = 0;
         let flush_every = 500;
 
@@ -262,46 +227,53 @@ pub fn scan_directory(
             let is_symlink = entry.path_is_symlink();
             let is_dir = entry.file_type().is_dir();
 
+            let parent = entry
+                .path()
+                .parent()
+                .map(|p| p.to_string_lossy().to_string())
+                .unwrap_or_default();
+
             let (size, modified, is_restricted) = match entry.metadata() {
                 Ok(meta) => {
                     let size = if meta.is_file() { meta.len() } else { 0 };
                     let modified = meta
                         .modified()
-                        .map(|t| {
-                            t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
-                        })
+                        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
                         .unwrap_or(0);
                     (size, modified, false)
                 }
                 Err(_) => (0, 0, true),
             };
 
-            local_buf.push(FlatEntry {
-                path: path_str,
+            local_buf.push((
+                path_str,
+                parent,
                 name,
                 size,
                 is_dir,
+                0,
                 modified,
                 is_symlink,
                 is_restricted,
-            });
+            ));
             local_count += 1;
 
-            // Flush local buffer to shared entries periodically
+            // Flush local buffer to DB periodically
             if local_count >= flush_every {
                 {
-                    let mut shared = entries.lock().unwrap();
-                    shared.append(&mut local_buf);
+                    let conn = db.lock().unwrap();
+                    db::insert_entries(&conn, scan_id, &local_buf).ok();
                 }
                 scanned_count.fetch_add(local_count, Ordering::Relaxed);
+                local_buf.clear();
                 local_count = 0;
             }
         }
 
         // Flush remaining
         if !local_buf.is_empty() {
-            let mut shared = entries.lock().unwrap();
-            shared.append(&mut local_buf);
+            let conn = db.lock().unwrap();
+            db::insert_entries(&conn, scan_id, &local_buf).ok();
         }
         if local_count > 0 {
             scanned_count.fetch_add(local_count, Ordering::Relaxed);
@@ -313,11 +285,10 @@ pub fn scan_directory(
     let _ = emitter_handle.join();
 
     let count = scanned_count.load(Ordering::Relaxed);
+    let scan_time = scan_start.elapsed().as_secs_f64();
     eprintln!(
         "[scan] complete: {} items in {:.1}s, {} child dirs",
-        count,
-        scan_start.elapsed().as_secs_f64(),
-        child_dirs.len()
+        count, scan_time, child_dirs.len()
     );
 
     // Final progress
@@ -329,39 +300,52 @@ pub fn scan_directory(
         },
     );
 
-    // Build final tree
-    let e = entries.lock().unwrap();
-    let final_tree = build_tree(root, &e)?;
+    // Compute folder sizes bottom-up BEFORE emitting final view-update
+    {
+        eprintln!("[scan] computing folder sizes...");
+        let size_start = Instant::now();
+        let conn = db.lock().unwrap();
+        db::compute_folder_sizes(&conn, scan_id)
+            .map_err(|e| format!("Failed to compute folder sizes: {}", e))?;
+        db::complete_scan(&conn, scan_id, scan_time)
+            .map_err(|e| format!("Failed to complete scan: {}", e))?;
+        eprintln!(
+            "[scan] folder sizes computed in {:.1}s",
+            size_start.elapsed().as_secs_f64()
+        );
+    }
 
-    // Store final tree in managed state
-    *tree_state.lock().unwrap() = Some(final_tree.clone());
-
-    // Emit final view-update so frontend gets the complete picture
+    // Emit final view-update so frontend gets the complete picture with accurate sizes
     {
         let vp = view_path.lock().unwrap().clone();
-        let view_node = if vp.is_empty() {
-            &final_tree
-        } else {
-            find_node(&final_tree, &vp).unwrap_or(&final_tree)
+        let conn = db.lock().unwrap();
+        let entries =
+            db::get_children(&conn, scan_id, &vp).map_err(|e| format!("DB error: {}", e))?;
+        let parent = db::get_entry(&conn, scan_id, &vp)
+            .map_err(|e| format!("DB error: {}", e))?;
+
+        let (parent_path, parent_size, parent_name) = match &parent {
+            Some(p) => (p.path.clone(), p.size, p.name.clone()),
+            None => (vp.clone(), 0, String::new()),
         };
 
         let update = ViewUpdate {
-            entries: shallow_children(view_node),
-            parent_path: view_node.path.clone(),
-            parent_size: view_node.size,
-            parent_name: view_node.name.clone(),
+            entries,
+            parent_path: parent_path.clone(),
+            parent_size,
+            parent_name: parent_name.clone(),
             total_scanned: count,
         };
 
         eprintln!(
             "[scan] emit final view-update: {} entries at '{}'",
             update.entries.len(),
-            view_node.name
+            parent_name
         );
         let _ = app_handle.emit("view-update", &update);
     }
 
-    Ok(final_tree)
+    Ok(())
 }
 
 /// Adaptive snapshot interval based on entry count.
@@ -373,70 +357,6 @@ fn adaptive_interval(entry_count: u32) -> u64 {
     } else {
         2000
     }
-}
-
-/// Build a nested `DirEntry` tree from a flat list of entries.
-fn build_tree(root: &str, entries: &[FlatEntry]) -> Result<DirEntry, String> {
-    if entries.is_empty() {
-        return Err("No entries found".into());
-    }
-
-    let path_to_idx: HashMap<&str, usize> = entries
-        .iter()
-        .enumerate()
-        .map(|(i, e)| (e.path.as_str(), i))
-        .collect();
-
-    let mut children_map: HashMap<usize, Vec<usize>> = HashMap::new();
-
-    for (i, entry) in entries.iter().enumerate() {
-        if let Some(parent) = std::path::Path::new(&entry.path).parent() {
-            let parent_str = parent.to_string_lossy();
-            if let Some(&parent_idx) = path_to_idx.get(parent_str.as_ref()) {
-                if parent_idx != i {
-                    children_map.entry(parent_idx).or_default().push(i);
-                }
-            }
-        }
-    }
-
-    fn build_node(
-        idx: usize,
-        entries: &[FlatEntry],
-        children_map: &HashMap<usize, Vec<usize>>,
-    ) -> DirEntry {
-        let entry = &entries[idx];
-        let mut children: Vec<DirEntry> = Vec::new();
-        let mut size = entry.size;
-
-        if let Some(child_indices) = children_map.get(&idx) {
-            for &child_idx in child_indices {
-                let child = build_node(child_idx, entries, children_map);
-                size += child.size;
-                children.push(child);
-            }
-            children.sort_by(|a, b| b.size.cmp(&a.size));
-        }
-
-        DirEntry {
-            path: entry.path.clone(),
-            name: entry.name.clone(),
-            size,
-            is_dir: entry.is_dir,
-            child_count: children.len() as u32,
-            modified: entry.modified,
-            is_symlink: entry.is_symlink,
-            is_restricted: entry.is_restricted,
-            children,
-        }
-    }
-
-    let root_idx = path_to_idx
-        .get(root)
-        .copied()
-        .ok_or_else(|| format!("Root path '{}' not found in entries", root))?;
-
-    Ok(build_node(root_idx, entries, &children_map))
 }
 
 pub fn check_full_disk_access() -> bool {

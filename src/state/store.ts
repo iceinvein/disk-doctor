@@ -7,6 +7,7 @@ type AppStore = {
   parentSize: number
   rootPath: string | null
   rootName: string | null
+  currentScanId: number | null
   breadcrumbs: BreadcrumbSegment[]
 
   // Selection
@@ -54,6 +55,7 @@ const initialState = {
   parentSize: 0,
   rootPath: null as string | null,
   rootName: null as string | null,
+  currentScanId: null as number | null,
   breadcrumbs: [] as BreadcrumbSegment[],
   selectedPaths: new Set<string>(),
   activePath: null as string | null,
@@ -75,6 +77,7 @@ export const useStore = create<AppStore>((set, get) => ({
     set({
       rootPath,
       rootName,
+      currentScanId: null,
       viewEntries: [],
       parentSize: 0,
       breadcrumbs: [{ name: rootName, path: rootPath }],

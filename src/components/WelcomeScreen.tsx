@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react'
 import { FolderSearch, Shield, History } from 'lucide-react'
-import { useScan, loadSavedScan, useNavigation } from '../hooks/useTauri'
+import { useScan, getLatestScan, loadScan, useNavigation } from '../hooks/useTauri'
 import { useStore } from '../state/store'
 import { formatSize } from '../state/helpers'
-import type { SavedScanMeta } from '../state/types'
+import type { ScanMeta } from '../state/types'
 
 function timeAgo(timestamp: number): string {
   const now = Math.floor(Date.now() / 1000)
@@ -20,20 +20,23 @@ export function WelcomeScreen() {
   const { navigateTo } = useNavigation()
   const initScan = useStore(s => s.initScan)
   const setScanComplete = useStore(s => s.setScanComplete)
-  const [savedScan, setSavedScan] = useState<SavedScanMeta | null>(null)
+  const [savedScan, setSavedScan] = useState<ScanMeta | null>(null)
 
   useEffect(() => {
-    loadSavedScan().then(setSavedScan).catch(console.error)
+    getLatestScan().then(setSavedScan).catch(console.error)
   }, [])
 
   async function handleResume() {
     if (!savedScan) return
 
-    // Restore state — the Rust side already restored the tree in load_saved_scan
+    // Load the scan into Rust state (sets current_scan_id + view_path)
+    await loadScan(savedScan.id)
+
+    // Restore frontend state
     initScan(savedScan.root_path, savedScan.root_name)
     setScanComplete(savedScan.scan_time)
 
-    // Navigate to root to populate viewEntries
+    // Navigate to root to populate viewEntries from DB
     await navigateTo(savedScan.root_path, [
       { name: savedScan.root_name, path: savedScan.root_path },
     ])
@@ -83,7 +86,7 @@ export function WelcomeScreen() {
 
           {savedScan && (
             <p className="text-xs text-[var(--color-text-tertiary)] text-center -mt-1 mb-1">
-              {savedScan.root_name} · {formatSize(savedScan.root_size)} · {timeAgo(savedScan.scanned_at)}
+              {savedScan.root_name} · {formatSize(savedScan.total_size)} · {timeAgo(savedScan.scanned_at)}
             </p>
           )}
 

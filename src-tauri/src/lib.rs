@@ -1,4 +1,5 @@
 mod commands;
+mod db;
 mod scanner;
 mod types;
 
@@ -10,7 +11,7 @@ pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_shell::init())
-        .manage(Mutex::new(ScanState::default()))
+        .manage(Mutex::new(ScanState::new()))
         .invoke_handler(tauri::generate_handler![
             commands::pick_folder,
             commands::scan_directory,
@@ -22,8 +23,9 @@ pub fn run() {
             commands::get_disk_usage,
             commands::check_full_disk_access,
             commands::open_full_disk_access_settings,
-            commands::save_scan,
-            commands::load_saved_scan,
+            commands::get_latest_scan,
+            commands::list_scans,
+            commands::load_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

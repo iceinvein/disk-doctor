@@ -1,5 +1,7 @@
+use crate::db;
 use crate::scanner;
-use crate::types::{DirEntry, DiskUsage, SavedScan, SavedScanMeta, ViewUpdate};
+use crate::types::{DiskUsage, ScanMeta, ViewUpdate};
+use rusqlite::Connection;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -7,15 +9,22 @@ use tauri::{AppHandle, State};
 
 pub struct ScanState {
     pub cancelled: Arc<AtomicBool>,
-    pub tree: Arc<Mutex<Option<DirEntry>>>,
+    pub db: Arc<Mutex<Connection>>,
+    pub current_scan_id: Arc<Mutex<Option<i64>>>,
     pub view_path: Arc<Mutex<String>>,
 }
 
-impl Default for ScanState {
-    fn default() -> Self {
+impl ScanState {
+    pub fn new() -> Self {
+        let db_path = db::db_path();
+        let conn = Connection::open(&db_path).expect("Failed to open database");
+        db::init_db(&conn).expect("Failed to initialize database");
+        eprintln!("[db] opened database at {:?}", db_path);
+
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
-            tree: Arc::new(Mutex::new(None)),
+            db: Arc::new(Mutex::new(conn)),
+            current_scan_id: Arc::new(Mutex::new(None)),
             view_path: Arc::new(Mutex::new(String::new())),
         }
     }
@@ -35,17 +44,34 @@ pub async fn scan_directory(
     path: String,
     app: AppHandle,
     scan_state: State<'_, Mutex<ScanState>>,
-) -> Result<DirEntry, String> {
-    let (cancelled, tree_state, view_path) = {
+) -> Result<(), String> {
+    let (cancelled, db, scan_id, view_path) = {
         let state = scan_state
             .lock()
             .map_err(|e| format!("Failed to lock scan state: {}", e))?;
         state.cancelled.store(false, Ordering::Relaxed);
         // Set initial view path to scan root
         *state.view_path.lock().unwrap() = path.clone();
+
+        // Create a new scan record in the DB
+        let name = std::path::Path::new(&path)
+            .file_name()
+            .unwrap_or(std::ffi::OsStr::new(&path))
+            .to_string_lossy()
+            .to_string();
+        let conn = state.db.lock().unwrap();
+        let scan_id = db::create_scan(&conn, &path, &name)
+            .map_err(|e| format!("Failed to create scan: {}", e))?;
+        drop(conn);
+
+        *state.current_scan_id.lock().unwrap() = Some(scan_id);
+
+        eprintln!("[cmd] scan_directory: created scan_id={} for path={}", scan_id, path);
+
         (
             Arc::clone(&state.cancelled),
-            Arc::clone(&state.tree),
+            Arc::clone(&state.db),
+            scan_id,
             Arc::clone(&state.view_path),
         )
     };
@@ -53,7 +79,7 @@ pub async fn scan_directory(
     let handle = app.clone();
 
     tauri::async_runtime::spawn_blocking(move || {
-        scanner::scan_directory(&path, &handle, cancelled, tree_state, view_path)
+        scanner::scan_directory(&path, &handle, cancelled, db, scan_id, view_path)
     })
     .await
     .map_err(|e| format!("Scan task failed: {}", e))?
@@ -69,62 +95,75 @@ pub fn cancel_scan(scan_state: State<'_, Mutex<ScanState>>) {
 #[tauri::command]
 pub fn set_view_path(path: String, scan_state: State<'_, Mutex<ScanState>>) {
     if let Ok(state) = scan_state.lock() {
-        eprintln!("[cmd] set_view_path → {}", path);
+        eprintln!("[cmd] set_view_path -> {}", path);
         *state.view_path.lock().unwrap() = path;
     }
 }
 
 #[tauri::command]
-pub fn get_children(path: String, scan_state: State<'_, Mutex<ScanState>>) -> Result<ViewUpdate, String> {
+pub fn get_children(
+    path: String,
+    scan_state: State<'_, Mutex<ScanState>>,
+) -> Result<ViewUpdate, String> {
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let tree_guard = state.tree.lock().map_err(|e| e.to_string())?;
+    let scan_id = state
+        .current_scan_id
+        .lock()
+        .unwrap()
+        .ok_or("No active scan")?;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
 
-    let tree = tree_guard.as_ref().ok_or("No scan data available")?;
+    let entries =
+        db::get_children(&conn, scan_id, &path).map_err(|e| format!("DB error: {}", e))?;
+    let parent = db::get_entry(&conn, scan_id, &path)
+        .map_err(|e| format!("DB error: {}", e))?;
 
-    // Find the node at `path`
-    let node = scanner::find_node(tree, &path)
-        .ok_or_else(|| format!("Path not found: {}", path))?;
-
-    // Return children with empty children (shallow)
-    let entries: Vec<DirEntry> = node
-        .children
-        .iter()
-        .map(|c| DirEntry {
-            path: c.path.clone(),
-            name: c.name.clone(),
-            size: c.size,
-            is_dir: c.is_dir,
-            child_count: c.child_count,
-            modified: c.modified,
-            is_symlink: c.is_symlink,
-            is_restricted: c.is_restricted,
-            children: vec![], // Don't send nested children
-        })
-        .collect();
+    let (parent_path, parent_size, parent_name) = match &parent {
+        Some(p) => (p.path.clone(), p.size, p.name.clone()),
+        None => (path.clone(), 0, String::new()),
+    };
 
     eprintln!(
-        "[cmd] get_children({}) → {} entries, parent_size={}",
+        "[cmd] get_children({}) -> {} entries, parent_size={}",
         path,
         entries.len(),
-        node.size
+        parent_size
     );
 
     Ok(ViewUpdate {
         entries,
-        parent_path: node.path.clone(),
-        parent_size: node.size,
-        parent_name: node.name.clone(),
+        parent_path,
+        parent_size,
+        parent_name,
         total_scanned: 0,
     })
 }
 
 #[tauri::command]
-pub async fn trash_items(paths: Vec<String>) -> Result<Vec<String>, String> {
+pub async fn trash_items(
+    paths: Vec<String>,
+    scan_state: State<'_, Mutex<ScanState>>,
+) -> Result<Vec<String>, String> {
     let mut failures: Vec<String> = Vec::new();
+
+    // Clone the Arcs we need before the async work
+    let (db, current_scan_id) = {
+        let state = scan_state.lock().map_err(|e| e.to_string())?;
+        (
+            Arc::clone(&state.db),
+            Arc::clone(&state.current_scan_id),
+        )
+    };
 
     for path in &paths {
         if let Err(e) = trash::delete(path) {
             failures.push(format!("{}: {}", path, e));
+        } else {
+            // Successfully trashed — also delete from DB
+            let conn = db.lock().unwrap();
+            if let Some(scan_id) = *current_scan_id.lock().unwrap() {
+                db::delete_entry(&conn, scan_id, path).ok();
+            }
         }
     }
 
@@ -154,92 +193,59 @@ pub fn check_full_disk_access() -> bool {
     scanner::check_full_disk_access()
 }
 
-fn save_dir() -> Result<std::path::PathBuf, String> {
-    let home = std::env::var("HOME").map_err(|e| e.to_string())?;
-    let dir = std::path::PathBuf::from(format!("{}/.disk-doctor", home));
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    }
-    Ok(dir)
-}
-
 #[tauri::command]
-pub async fn save_scan(
-    root_path: String,
-    root_name: String,
-    scan_time: f64,
+pub fn get_latest_scan(
     scan_state: State<'_, Mutex<ScanState>>,
-) -> Result<(), String> {
-    // Clone tree under lock, then release lock before heavy work
-    let tree = {
-        let state = scan_state.lock().map_err(|e| e.to_string())?;
-        let tree_guard = state.tree.lock().map_err(|e| e.to_string())?;
-        tree_guard.as_ref().ok_or("No scan data to save")?.clone()
-    };
-
-    let size = tree.size;
-
-    // Serialize + write on a blocking thread to avoid freezing the UI
-    tauri::async_runtime::spawn_blocking(move || {
-        let saved = SavedScan {
-            tree,
-            root_path,
-            root_name,
-            scanned_at: std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap_or_default()
-                .as_secs() as i64,
-            scan_time,
-        };
-
-        let path = save_dir()?.join("last-scan.json");
-        let json = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
-        std::fs::write(&path, json).map_err(|e| e.to_string())?;
-
-        eprintln!("[save] saved scan to {:?} ({} bytes)", path, size);
-        Ok(())
-    })
-    .await
-    .map_err(|e| format!("Save task failed: {}", e))?
-}
-
-#[tauri::command]
-pub async fn load_saved_scan(
-    scan_state: State<'_, Mutex<ScanState>>,
-) -> Result<Option<SavedScanMeta>, String> {
-    let save_path = save_dir()?.join("last-scan.json");
-    if !save_path.exists() {
-        return Ok(None);
-    }
-
-    // Read + deserialize on a blocking thread
-    let saved: SavedScan = tauri::async_runtime::spawn_blocking(move || {
-        let json = std::fs::read_to_string(&save_path).map_err(|e| e.to_string())?;
-        let saved: SavedScan = serde_json::from_str(&json).map_err(|e| e.to_string())?;
-        eprintln!(
-            "[load] restored scan: {} ({} bytes, scanned at {})",
-            saved.root_name, saved.tree.size, saved.scanned_at
-        );
-        Ok::<SavedScan, String>(saved)
-    })
-    .await
-    .map_err(|e| format!("Load task failed: {}", e))??;
-
-    // Restore tree into managed state (pointer swap, no serialization)
-    let meta = SavedScanMeta {
-        root_path: saved.root_path.clone(),
-        root_name: saved.root_name.clone(),
-        root_size: saved.tree.size,
-        scanned_at: saved.scanned_at,
-        scan_time: saved.scan_time,
-    };
-
+) -> Result<Option<ScanMeta>, String> {
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    *state.view_path.lock().unwrap() = saved.root_path.clone();
-    // Move the tree (no clone needed — we own it)
-    *state.tree.lock().unwrap() = Some(saved.tree);
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::get_latest_scan(&conn).map_err(|e| format!("DB error: {}", e))
+}
 
-    Ok(Some(meta))
+#[tauri::command]
+pub fn list_scans(scan_state: State<'_, Mutex<ScanState>>) -> Result<Vec<ScanMeta>, String> {
+    let state = scan_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+    db::list_scans(&conn).map_err(|e| format!("DB error: {}", e))
+}
+
+#[tauri::command]
+pub fn load_scan(
+    scan_id: i64,
+    scan_state: State<'_, Mutex<ScanState>>,
+) -> Result<ScanMeta, String> {
+    let state = scan_state.lock().map_err(|e| e.to_string())?;
+    let conn = state.db.lock().map_err(|e| e.to_string())?;
+
+    // Verify the scan exists by checking the scans table
+    let meta: ScanMeta = conn
+        .query_row(
+            "SELECT id, root_path, root_name, scanned_at, scan_time, total_size, total_items FROM scans WHERE id = ?1",
+            rusqlite::params![scan_id],
+            |row| {
+                Ok(ScanMeta {
+                    id: row.get(0)?,
+                    root_path: row.get(1)?,
+                    root_name: row.get(2)?,
+                    scanned_at: row.get(3)?,
+                    scan_time: row.get::<_, Option<f64>>(4)?.unwrap_or(0.0),
+                    total_size: row.get::<_, i64>(5)? as u64,
+                    total_items: row.get::<_, i64>(6)? as u32,
+                })
+            },
+        )
+        .map_err(|e| format!("Scan not found: {}", e))?;
+
+    // Set as current scan
+    *state.current_scan_id.lock().unwrap() = Some(scan_id);
+    *state.view_path.lock().unwrap() = meta.root_path.clone();
+
+    eprintln!(
+        "[cmd] load_scan: loaded scan_id={}, root={}",
+        scan_id, meta.root_path
+    );
+
+    Ok(meta)
 }
 
 #[tauri::command]

@@ -19,6 +19,7 @@ pub fn run() {
             commands::open_in_finder,
             commands::get_disk_usage,
             commands::check_full_disk_access,
+            commands::open_full_disk_access_settings,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

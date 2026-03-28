@@ -35,6 +35,7 @@ export type AppState = {
   scanProgress: ScanProgress | null
   scanTime: number | null
   error: string | null
+  showPermissionGuide: boolean
 }
 
 export type Action =
@@ -51,4 +52,5 @@ export type Action =
   | { type: 'SET_SORT'; field: SortField }
   | { type: 'REMOVE_PATHS'; paths: string[] }
   | { type: 'SET_ERROR'; error: string | null }
+  | { type: 'SHOW_PERMISSION_GUIDE'; show: boolean }
   | { type: 'RESET' }

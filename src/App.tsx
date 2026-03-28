@@ -9,6 +9,7 @@ import { FileList } from './components/FileList'
 import { DetailPanel } from './components/DetailPanel'
 import { StatusBar } from './components/StatusBar'
 import { ScanModal } from './components/ScanModal'
+import { PermissionGuide } from './components/PermissionGuide'
 
 export default function App() {
   const [state, dispatch] = useReducer(appReducer, initialState)
@@ -45,6 +46,8 @@ export default function App() {
             </div>
             <StatusBar />
           </>
+        ) : state.showPermissionGuide ? (
+          <PermissionGuide />
         ) : (
           <WelcomeScreen />
         )}

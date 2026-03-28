@@ -41,11 +41,7 @@ export function useScan() {
     try {
       const hasAccess = await invoke<boolean>('check_full_disk_access')
       if (!hasAccess) {
-        dispatch({
-          type: 'SET_ERROR',
-          error:
-            'Full Disk Access is required. Go to System Settings > Privacy & Security > Full Disk Access and enable it for Disk Doctor, then restart the app.',
-        })
+        dispatch({ type: 'SHOW_PERMISSION_GUIDE', show: true })
         return
       }
 
@@ -107,6 +103,14 @@ export function useTrash() {
 
 export async function openInFinder(path: string): Promise<void> {
   await invoke('open_in_finder', { path })
+}
+
+export async function checkFullDiskAccess(): Promise<boolean> {
+  return invoke<boolean>('check_full_disk_access')
+}
+
+export async function openFullDiskAccessSettings(): Promise<void> {
+  await invoke('open_full_disk_access_settings')
 }
 
 export async function getDiskUsage(path: string): Promise<DiskUsage> {

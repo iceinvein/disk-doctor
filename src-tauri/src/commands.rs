@@ -92,3 +92,23 @@ pub fn get_disk_usage(path: String) -> Result<DiskUsage, String> {
 pub fn check_full_disk_access() -> bool {
     scanner::check_full_disk_access()
 }
+
+#[tauri::command]
+pub fn open_full_disk_access_settings() -> Result<(), String> {
+    use std::process::Command;
+
+    // Try the modern macOS Ventura+ URL first
+    let result = Command::new("open")
+        .arg("x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_AllFiles")
+        .spawn();
+
+    if result.is_err() {
+        // Fallback for older macOS
+        Command::new("open")
+            .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles")
+            .spawn()
+            .map_err(|e| format!("Failed to open System Settings: {}", e))?;
+    }
+
+    Ok(())
+}

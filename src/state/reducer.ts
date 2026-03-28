@@ -12,6 +12,7 @@ export const initialState: AppState = {
   scanProgress: null,
   scanTime: null,
   error: null,
+  showPermissionGuide: false,
 }
 
 export function appReducer(state: AppState, action: Action): AppState {
@@ -138,6 +139,12 @@ export function appReducer(state: AppState, action: Action): AppState {
         ...state,
         error: action.error,
         scanning: false,
+      }
+
+    case 'SHOW_PERMISSION_GUIDE':
+      return {
+        ...state,
+        showPermissionGuide: action.show,
       }
 
     case 'RESET':

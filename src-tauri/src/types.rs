@@ -34,3 +34,12 @@ pub struct DiskUsage {
     pub free: u64,
     pub used: u64,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedScan {
+    pub tree: DirEntry,
+    pub root_path: String,
+    pub root_name: String,
+    pub scanned_at: i64,
+    pub scan_time: f64,
+}

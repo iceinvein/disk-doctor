@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../state/store'
-import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment } from '../state/types'
+import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment, SavedScan } from '../state/types'
 
 /**
  * Set up Tauri event listeners for scan streaming.
@@ -70,6 +70,9 @@ export function useScan() {
 
       console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
       setScanComplete(scanTime)
+
+      // Auto-save for next launch
+      invoke('save_scan', { rootPath: path, rootName: name, scanTime }).catch(console.error)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
@@ -91,6 +94,9 @@ export function useScan() {
 
       console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
       setScanComplete(scanTime)
+
+      // Auto-save for next launch
+      invoke('save_scan', { rootPath: '/', rootName: 'Macintosh HD', scanTime }).catch(console.error)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
@@ -160,7 +166,7 @@ export function useNavigation() {
     [navigateTo],
   )
 
-  return { navigateInto, navigateBack, navigateToBreadcrumb }
+  return { navigateTo, navigateInto, navigateBack, navigateToBreadcrumb }
 }
 
 export function useTrash() {
@@ -204,4 +210,8 @@ export async function openFullDiskAccessSettings(): Promise<void> {
 
 export async function getDiskUsage(path: string): Promise<DiskUsage> {
   return invoke<DiskUsage>('get_disk_usage', { path })
+}
+
+export async function loadSavedScan(): Promise<SavedScan | null> {
+  return invoke<SavedScan | null>('load_saved_scan')
 }

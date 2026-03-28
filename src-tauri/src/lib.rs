@@ -22,6 +22,8 @@ pub fn run() {
             commands::get_disk_usage,
             commands::check_full_disk_access,
             commands::open_full_disk_access_settings,
+            commands::save_scan,
+            commands::load_saved_scan,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

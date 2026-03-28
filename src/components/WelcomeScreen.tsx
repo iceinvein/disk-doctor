@@ -1,8 +1,43 @@
-import { FolderSearch, Shield } from 'lucide-react'
-import { useScan } from '../hooks/useTauri'
+import { useEffect, useState } from 'react'
+import { FolderSearch, Shield, History } from 'lucide-react'
+import { useScan, loadSavedScan, useNavigation } from '../hooks/useTauri'
+import { useStore } from '../state/store'
+import { formatSize } from '../state/helpers'
+import type { SavedScan } from '../state/types'
+
+function timeAgo(timestamp: number): string {
+  const now = Math.floor(Date.now() / 1000)
+  const diff = now - timestamp
+  if (diff < 60) return 'just now'
+  if (diff < 3600) return `${Math.floor(diff / 60)}m ago`
+  if (diff < 86400) return `${Math.floor(diff / 3600)}h ago`
+  if (diff < 604800) return `${Math.floor(diff / 86400)}d ago`
+  return new Date(timestamp * 1000).toLocaleDateString()
+}
 
 export function WelcomeScreen() {
   const { scanFolder, scanEntireDisk } = useScan()
+  const { navigateTo } = useNavigation()
+  const initScan = useStore(s => s.initScan)
+  const setScanComplete = useStore(s => s.setScanComplete)
+  const [savedScan, setSavedScan] = useState<SavedScan | null>(null)
+
+  useEffect(() => {
+    loadSavedScan().then(setSavedScan).catch(console.error)
+  }, [])
+
+  async function handleResume() {
+    if (!savedScan) return
+
+    // Restore state — the Rust side already restored the tree in load_saved_scan
+    initScan(savedScan.root_path, savedScan.root_name)
+    setScanComplete(savedScan.scan_time)
+
+    // Navigate to root to populate viewEntries
+    await navigateTo(savedScan.root_path, [
+      { name: savedScan.root_name, path: savedScan.root_path },
+    ])
+  }
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 px-8">
@@ -35,9 +70,30 @@ export function WelcomeScreen() {
         </p>
 
         <div className="flex flex-col gap-3 w-72">
+          {/* Resume last scan — shown first if available */}
+          {savedScan && (
+            <button
+              onClick={handleResume}
+              className="btn-press flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-[var(--color-accent)] text-white font-medium text-sm hover:bg-[var(--color-accent-hover)] transition-all cursor-pointer shadow-md shadow-blue-500/10"
+            >
+              <History size={18} />
+              Resume Last Scan
+            </button>
+          )}
+
+          {savedScan && (
+            <p className="text-xs text-[var(--color-text-tertiary)] text-center -mt-1 mb-1">
+              {savedScan.root_name} · {formatSize(savedScan.tree.size)} · {timeAgo(savedScan.scanned_at)}
+            </p>
+          )}
+
           <button
             onClick={scanFolder}
-            className="btn-press flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl bg-[var(--color-accent)] text-white font-medium text-sm hover:bg-[var(--color-accent-hover)] transition-all cursor-pointer shadow-md shadow-blue-500/10"
+            className={`btn-press flex items-center justify-center gap-2.5 px-6 py-3.5 rounded-xl font-medium text-sm transition-all cursor-pointer ${
+              savedScan
+                ? 'bg-[var(--color-bg-secondary)] text-[var(--color-text-primary)] border border-[var(--color-border)] hover:bg-[var(--color-bg-hover)]'
+                : 'bg-[var(--color-accent)] text-white hover:bg-[var(--color-accent-hover)] shadow-md shadow-blue-500/10'
+            }`}
           >
             <FolderSearch size={18} />
             Choose Folder

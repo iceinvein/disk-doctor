@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect, useRef } from 'react'
 import { Trash2, Loader2, XCircle } from 'lucide-react'
 import { useStore } from '../state/store'
 import { formatSize } from '../state/helpers'
@@ -14,6 +14,19 @@ export function StatusBar() {
   const { trashItems } = useTrash()
   const { cancelScan } = useScan()
   const [showConfirm, setShowConfirm] = useState(false)
+
+  // Elapsed time counter during scan
+  const [elapsed, setElapsed] = useState(0)
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => {
+    if (scanning) {
+      setElapsed(0)
+      intervalRef.current = setInterval(() => setElapsed(e => e + 1), 1000)
+    } else {
+      if (intervalRef.current) clearInterval(intervalRef.current)
+    }
+    return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
+  }, [scanning])
 
   const totalSize = useMemo(
     () => viewEntries.reduce((sum, e) => sum + e.size, 0),
@@ -42,7 +55,7 @@ export function StatusBar() {
       {scanning ? (
         <span className="flex items-center gap-2 text-xs text-[var(--color-accent)]">
           <Loader2 size={12} className="animate-spin" />
-          Scanning… {scanProgress ? `${scanProgress.scanned_count.toLocaleString()} items found` : ''}
+          Scanning… {scanProgress ? `${scanProgress.scanned_count.toLocaleString()} items` : ''}{elapsed > 0 ? ` · ${elapsed}s` : ''}
         </span>
       ) : (
         <span className={`text-xs text-[var(--color-text-tertiary)] ${scanTime !== null ? 'scan-complete-pulse' : ''}`}>
@@ -74,7 +87,7 @@ export function StatusBar() {
       {showConfirm && (
         <ConfirmDialog
           title="Trash Selected Items"
-          message={`Move ${selectedCount} item${selectedCount !== 1 ? 's' : ''} (${formatSize(selectedSize)}) to the Trash?`}
+          message={`Move ${selectedCount} item${selectedCount !== 1 ? 's' : ''} (${formatSize(selectedSize)}) to the Trash? You can recover them from the Trash later.`}
           confirmLabel="Move to Trash"
           onConfirm={handleBatchTrash}
           onCancel={() => setShowConfirm(false)}

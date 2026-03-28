@@ -30,7 +30,7 @@ export function DetailPanel() {
     return (
       <div className="w-72 border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] flex items-center justify-center p-6 shrink-0">
         <p className="text-sm text-[var(--color-text-tertiary)] text-center">
-          Select an item to view details
+          Click an item to see its details
         </p>
       </div>
     )

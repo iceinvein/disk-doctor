@@ -85,7 +85,10 @@ export function FileList() {
     return (
       <div className="flex-1 flex items-center justify-center">
         <p className="text-sm text-[var(--color-text-secondary)]">
-          Empty folder
+          No items in this folder
+        </p>
+        <p className="text-xs text-[var(--color-text-tertiary)] mt-1">
+          Go back to explore other folders
         </p>
       </div>
     )

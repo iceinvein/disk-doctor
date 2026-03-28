@@ -112,8 +112,8 @@ export function WelcomeScreen() {
         </div>
 
         <p className="text-xs text-[var(--color-text-tertiary)] max-w-xs text-center mt-8 leading-relaxed">
-          Scanning the entire disk requires Full Disk Access in<br />
-          System Settings &rarr; Privacy &amp; Security
+          Tip: Choose a folder for a quick scan, or grant Full Disk Access
+          in System Settings for a complete picture of your storage.
         </p>
       </div>
     </div>

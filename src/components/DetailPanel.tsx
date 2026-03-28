@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { Folder, File, Link, Lock, Trash2, ExternalLink } from 'lucide-react'
+import { Trash2, ExternalLink } from 'lucide-react'
 import { useStore } from '../state/store'
 import { formatSize, formatDate } from '../state/helpers'
+import { getCategoryColor, getIcon } from '../state/categories'
 import { useTrash, openInFinder } from '../hooks/useTauri'
 import { ConfirmDialog } from './ConfirmDialog'
 
@@ -35,14 +36,15 @@ export function DetailPanel() {
     )
   }
 
-  const IconComponent = entry.is_symlink ? Link : entry.is_restricted ? Lock : entry.is_dir ? Folder : File
+  const IconComponent = getIcon(entry)
+  const categoryColor = getCategoryColor(entry)
 
   return (
     <div className="w-72 border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] flex flex-col p-5 shrink-0 overflow-y-auto fade-in" key={entry.path}>
-      {/* Icon and name */}
+      {/* Icon and name — colored by file type category */}
       <div className="flex flex-col items-center mb-5 pt-2">
         <div className="w-14 h-14 rounded-2xl bg-[var(--color-bg-hover)] flex items-center justify-center mb-3">
-          <IconComponent size={28} className="text-[var(--color-accent)]" />
+          <IconComponent size={28} style={{ color: categoryColor }} />
         </div>
         <h2 className="text-sm font-semibold text-[var(--color-text-primary)] text-center break-all leading-snug">
           {entry.name}

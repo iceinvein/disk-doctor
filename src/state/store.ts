@@ -41,6 +41,7 @@ type AppStore = {
   toggleSelected: (path: string) => void
   selectAll: () => void
   deselectAll: () => void
+  selectRange: (paths: string[]) => void
   setSort: (field: SortField) => void
   removePaths: (paths: string[]) => void
   setError: (error: string | null) => void
@@ -139,6 +140,12 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   deselectAll: () => set({ selectedPaths: new Set() }),
+
+  selectRange: (paths) => {
+    const next = new Set(get().selectedPaths)
+    for (const p of paths) next.add(p)
+    set({ selectedPaths: next })
+  },
 
   setSort: (field) => {
     const { sortBy, sortDir } = get()

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Trash2, ExternalLink } from 'lucide-react'
+import { Trash2, ExternalLink, MousePointerClick } from 'lucide-react'
 import { useStore } from '../state/store'
 import { formatSize, formatDate } from '../state/helpers'
 import { getCategoryColor, getIcon } from '../state/categories'
@@ -29,9 +29,13 @@ export function DetailPanel() {
   if (!entry) {
     return (
       <div className="w-72 border-l border-[var(--color-border)] bg-[var(--color-bg-secondary)] flex items-center justify-center p-6 shrink-0">
-        <p className="text-sm text-[var(--color-text-tertiary)] text-center">
-          Click an item to see its details
-        </p>
+        <div className="flex flex-col items-center text-center gap-1">
+          <MousePointerClick size={24} className="text-[var(--color-text-tertiary)] mb-2" />
+          <p className="text-sm text-[var(--color-text-secondary)]">Select an item</p>
+          <p className="text-xs text-[var(--color-text-tertiary)] max-w-[160px] leading-relaxed">
+            Click any file or folder to inspect its size and details
+          </p>
+        </div>
       </div>
     )
   }
@@ -101,8 +105,21 @@ export function DetailPanel() {
       </div>
 
       {trashError && (
-        <div className="mt-3 px-3 py-2 rounded-lg bg-[var(--color-danger-bg)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-xs text-center">
-          {trashError}
+        <div className="mt-3 px-3 py-2.5 rounded-lg bg-[var(--color-danger-bg)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-xs">
+          <div className="flex items-start justify-between gap-2">
+            <span>{trashError}</span>
+            <button
+              onClick={() => entry && openInFinder(entry.path)}
+              className="shrink-0 text-[var(--color-accent)] hover:underline cursor-pointer transition-colors"
+            >
+              Reveal
+            </button>
+          </div>
+          <p className="text-[var(--color-text-tertiary)] mt-1 leading-relaxed">
+            {/permission|access/i.test(trashError)
+              ? 'Try granting Full Disk Access in System Settings'
+              : 'The file may be in use. Try closing applications that might be using it.'}
+          </p>
         </div>
       )}
 

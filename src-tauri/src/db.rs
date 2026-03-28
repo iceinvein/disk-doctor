@@ -2,6 +2,9 @@ use crate::types::{DirEntry, ScanMeta};
 use rusqlite::{params, Connection, OptionalExtension};
 use std::path::PathBuf;
 
+/// (path, parent, name, size, is_dir, child_count, modified, is_symlink, is_restricted)
+pub type EntryRow = (String, String, String, u64, bool, u32, i64, bool, bool);
+
 pub fn db_path() -> PathBuf {
     let mut path = dirs::data_dir().expect("Could not find Application Support directory");
     path.push("Disk Doctor");
@@ -85,7 +88,7 @@ pub fn create_scan(conn: &Connection, root_path: &str, root_name: &str) -> rusql
 pub fn insert_entries(
     conn: &Connection,
     scan_id: i64,
-    entries: &[(String, String, String, u64, bool, u32, i64, bool, bool)],
+    entries: &[EntryRow],
 ) -> rusqlite::Result<()> {
     let tx = conn.unchecked_transaction()?;
     {
@@ -347,6 +350,7 @@ pub fn list_scans(conn: &Connection) -> rusqlite::Result<Vec<ScanMeta>> {
 }
 
 /// Delete a scan and all its entries.
+#[allow(dead_code)]
 pub fn delete_scan(conn: &Connection, scan_id: i64) -> rusqlite::Result<()> {
     conn.execute("DELETE FROM entries WHERE scan_id = ?1", params![scan_id])?;
     conn.execute("DELETE FROM scans WHERE id = ?1", params![scan_id])?;

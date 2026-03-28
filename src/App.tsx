@@ -1,4 +1,4 @@
-import { useEffect } from 'react'
+import { useEffect, useRef } from 'react'
 import { X } from 'lucide-react'
 import { useStore } from './state/store'
 import { useScanEvents, useNavigation } from './hooks/useTauri'
@@ -79,6 +79,18 @@ export default function App() {
     return () => window.removeEventListener('keydown', handleKeyDown)
   }, [navigateBack, deselectAll, setActive, toggleShortcuts])
 
+  // Auto-dismiss error toast after 8 seconds
+  const errorDismissTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  useEffect(() => {
+    if (errorDismissTimer.current) clearTimeout(errorDismissTimer.current)
+    if (error) {
+      errorDismissTimer.current = setTimeout(() => setError(null), 8000)
+    }
+    return () => {
+      if (errorDismissTimer.current) clearTimeout(errorDismissTimer.current)
+    }
+  }, [error, setError])
+
   return (
     <div className="flex flex-col h-screen bg-[var(--color-bg-primary)]">
       <Titlebar />
@@ -102,19 +114,33 @@ export default function App() {
 
       {/* Error toast */}
       {error && (
-        <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[var(--color-bg-secondary)]
-                        text-[var(--color-text-primary)] px-5 py-3 rounded-xl text-sm max-w-lg z-50
-                        border border-[var(--color-danger)]/30 shadow-lg fade-in">
-          <div className="flex items-center gap-3">
-            <span className="text-[var(--color-danger)]">{error}</span>
-            <button
-              onClick={() => setError(null)}
-              className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
-            >
-              <X size={14} />
-            </button>
+        <>
+          <style>{`@keyframes shrinkWidth { from { width: 100% } to { width: 0% } }`}</style>
+          <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[var(--color-bg-secondary)]
+                          text-[var(--color-text-primary)] px-5 pt-3 pb-3.5 rounded-xl text-sm max-w-lg z-50
+                          border border-[var(--color-danger)]/30 shadow-lg fade-in overflow-hidden">
+            <div className="flex items-center gap-3">
+              <span className="text-[var(--color-danger)]">{error}</span>
+              <button
+                onClick={() => setError(null)}
+                className="flex items-center gap-1 shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
+                aria-label="Dismiss"
+              >
+                <X size={14} />
+                <span className="text-xs">Dismiss</span>
+              </button>
+            </div>
+            {/* Auto-dismiss countdown bar */}
+            <div
+              className="absolute bottom-0 left-0 h-0.5 rounded-b-xl"
+              style={{
+                width: '100%',
+                backgroundColor: 'color-mix(in srgb, var(--color-danger) 30%, transparent)',
+                animation: 'shrinkWidth 8s linear forwards',
+              }}
+            />
           </div>
-        </div>
+        </>
       )}
     </div>
   )

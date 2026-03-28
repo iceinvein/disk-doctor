@@ -54,12 +54,6 @@ export function WelcomeScreen() {
             strokeDasharray="60 254" strokeDashoffset="-110" transform="rotate(-90 60 60)" opacity="0.85" />
           <circle className="ring-segment" cx="60" cy="60" r="50" fill="none" stroke="var(--color-cat-code)" strokeWidth="16"
             strokeDasharray="40 274" strokeDashoffset="-170" transform="rotate(-90 60 60)" opacity="0.85" />
-          <text x="60" y="56" textAnchor="middle" fill="var(--color-text-primary)" fontSize="16" fontWeight="bold">
-            ...
-          </text>
-          <text x="60" y="72" textAnchor="middle" fill="var(--color-text-secondary)" fontSize="9">
-            of storage
-          </text>
         </svg>
       </div>
 

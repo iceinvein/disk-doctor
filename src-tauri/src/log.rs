@@ -6,6 +6,7 @@
 ///   log!(Cmd,  "get_children({}) → {} entries", path, count);
 
 #[derive(Debug, Clone, Copy)]
+#[allow(dead_code)]
 pub enum Category {
     Scan,
     Db,

@@ -8,6 +8,8 @@ use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
+use crate::db::EntryRow;
+
 /// Parallel scan that writes entries to SQLite in batches.
 ///
 /// All parallel walkers flush entries to the DB periodically. A dedicated
@@ -69,7 +71,7 @@ pub fn scan_directory(
     // Discover immediate children for parallel dispatch
     let mut child_dirs: Vec<String> = Vec::new();
     if let Ok(read_dir) = std::fs::read_dir(root_path) {
-        let mut batch: Vec<(String, String, String, u64, bool, u32, i64, bool, bool)> = Vec::new();
+        let mut batch: Vec<EntryRow> = Vec::new();
 
         for dir_entry_result in read_dir {
             if cancelled.load(Ordering::Relaxed) {
@@ -204,8 +206,7 @@ pub fn scan_directory(
             return;
         }
 
-        let mut local_buf: Vec<(String, String, String, u64, bool, u32, i64, bool, bool)> =
-            Vec::new();
+        let mut local_buf: Vec<EntryRow> = Vec::new();
         let mut local_count: u32 = 0;
         let flush_every = 2000;
 
@@ -373,7 +374,7 @@ pub fn get_disk_usage(path: &str) -> Result<DiskUsage, String> {
     }
 
     let stat = unsafe { stat.assume_init() };
-    let block_size = stat.f_frsize as u64;
+    let block_size = stat.f_frsize;
     let total = stat.f_blocks as u64 * block_size;
     let free = stat.f_bavail as u64 * block_size;
     let used = total.saturating_sub(free);

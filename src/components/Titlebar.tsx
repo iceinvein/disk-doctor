@@ -14,7 +14,7 @@ export function Titlebar() {
         <button
           onClick={reset}
           title="Start a new scan"
-          className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
+          className="flex items-center gap-1.5 text-xs text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-bg-hover)] cursor-pointer transition-colors rounded-md px-2 py-1"
         >
           <RotateCcw size={12} />
           New

@@ -132,6 +132,15 @@ html, body {
   100% { opacity: 1; }
 }
 
+/* Scan complete highlight */
+.scan-complete-highlight {
+  animation: completeHighlight 0.4s cubic-bezier(0.25, 1, 0.5, 1);
+}
+@keyframes completeHighlight {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 /* Copied flash */
 .copied-flash {
   animation: copiedFlash 1.2s cubic-bezier(0.25, 1, 0.5, 1) forwards;

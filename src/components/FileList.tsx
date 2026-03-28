@@ -1,4 +1,4 @@
-import { useRef, useMemo, useState, useCallback } from 'react'
+import { useRef, useMemo, useState, useCallback, useEffect } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore } from '../state/store'
 import { sortEntries } from '../state/helpers'
@@ -25,6 +25,7 @@ export function FileList() {
   const selectedPaths = useStore(s => s.selectedPaths)
   const setActive = useStore(s => s.setActive)
   const toggleSelected = useStore(s => s.toggleSelected)
+  const selectRange = useStore(s => s.selectRange)
   const setSort = useStore(s => s.setSort)
   const searchQuery = useStore(s => s.searchQuery)
   const parentRef = useRef<HTMLDivElement>(null)
@@ -35,6 +36,8 @@ export function FileList() {
 
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
   const [trashConfirm, setTrashConfirm] = useState<DirEntry | null>(null)
+  const focusedIndexRef = useRef<number>(-1)
+  const lastClickedRef = useRef<number>(-1)
 
   const sorted = useMemo(() => {
     // Skip client-side sort during scanning — Rust already sorts by size desc
@@ -72,6 +75,38 @@ export function FileList() {
     estimateSize: () => 48,
     overscan: 10,
   })
+
+  // Reset focused index when entries change (navigated to a new folder)
+  useEffect(() => {
+    focusedIndexRef.current = -1
+    lastClickedRef.current = -1
+  }, [entries])
+
+  // Keyboard navigation: ↑ / ↓ arrows
+  useEffect(() => {
+    function handleKeyDown(e: KeyboardEvent) {
+      if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return
+      const target = e.target as HTMLElement
+      if (target.tagName === 'INPUT') return
+      e.preventDefault()
+
+      const prev = focusedIndexRef.current
+      let next: number
+      if (e.key === 'ArrowDown') {
+        next = prev === -1 ? 0 : Math.min(prev + 1, entries.length - 1)
+      } else {
+        next = Math.max(prev === -1 ? 0 : prev - 1, 0)
+      }
+      if (entries[next]) {
+        focusedIndexRef.current = next
+        setActive(entries[next].path)
+        virtualizer.scrollToIndex(next, { align: 'auto' })
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [entries, setActive, virtualizer])
 
   function handleSort(field: SortField) {
     setSort(field)
@@ -113,7 +148,16 @@ export function FileList() {
         </button>
 
         {/* Spacer for bar */}
-        <div className="w-28 shrink-0" />
+        <div className="w-20 shrink-0" />
+
+        <button
+          onClick={() => handleSort('modified')}
+          className={`text-xs font-medium w-20 text-right shrink-0 cursor-pointer hover:text-[var(--color-text-primary)] ${
+            sortBy === 'modified' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
+          }`}
+        >
+          Modified{sortIndicator('modified')}
+        </button>
 
         <button
           onClick={() => handleSort('size')}
@@ -162,7 +206,19 @@ export function FileList() {
                   maxSize={maxSize}
                   isActive={activePath === entry.path}
                   isSelected={selectedPaths.has(entry.path)}
-                  onActivate={() => setActive(entry.path)}
+                  onActivate={(e) => {
+                    const index = virtualRow.index
+                    if (e.shiftKey && lastClickedRef.current !== -1) {
+                      const start = Math.min(lastClickedRef.current, index)
+                      const end = Math.max(lastClickedRef.current, index)
+                      const rangePaths = entries.slice(start, end + 1).map(r => r.path)
+                      selectRange(rangePaths)
+                    } else {
+                      lastClickedRef.current = index
+                      focusedIndexRef.current = index
+                      setActive(entry.path)
+                    }
+                  }}
                   onToggleSelect={() => toggleSelected(entry.path)}
                   onNavigate={() => navigateInto(entry)}
                   onContextMenu={(pos) => setContextMenu({ entry, x: pos.x, y: pos.y })}

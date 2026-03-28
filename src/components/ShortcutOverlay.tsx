@@ -12,6 +12,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: '\u2190 / Backspace', description: 'Go back' },
       { keys: 'Click name', description: 'Open folder' },
+      { keys: '\u2191 / \u2193', description: 'Navigate items' },
       { keys: 'Escape', description: 'Deselect all' },
     ],
   },
@@ -20,6 +21,7 @@ const SHORTCUT_GROUPS: ShortcutGroup[] = [
     shortcuts: [
       { keys: '\u2318A', description: 'Select all' },
       { keys: 'Click', description: 'Select item' },
+      { keys: 'Shift+Click', description: 'Range select' },
       { keys: 'Checkbox', description: 'Toggle selection' },
     ],
   },

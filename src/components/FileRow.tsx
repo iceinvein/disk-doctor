@@ -1,6 +1,6 @@
 import { ChevronRight } from 'lucide-react'
 import type { DirEntry } from '../state/types'
-import { formatSize } from '../state/helpers'
+import { formatSize, formatDate } from '../state/helpers'
 import { getCategory, getIcon, CATEGORY_COLORS } from '../state/categories'
 
 type FileRowProps = {
@@ -8,7 +8,7 @@ type FileRowProps = {
   maxSize: number
   isActive: boolean
   isSelected: boolean
-  onActivate: () => void
+  onActivate: (e: React.MouseEvent) => void
   onToggleSelect: () => void
   onNavigate: () => void
   onContextMenu: (pos: { x: number; y: number }) => void
@@ -33,10 +33,10 @@ export function FileRow({
     <div
       className={`flex items-center h-12 px-3 gap-3 cursor-pointer transition-all duration-100 ${
         isActive
-          ? 'bg-[var(--color-bg-selected)] border-l-2 border-l-[var(--color-accent)]'
-          : 'border-l-2 border-l-transparent hover:bg-[var(--color-bg-hover)]'
+          ? 'bg-[var(--color-bg-selected)] border-l-[3px] border-l-[var(--color-accent)]'
+          : 'border-l-[3px] border-l-transparent hover:bg-[var(--color-bg-hover)]'
       }`}
-      onClick={onActivate}
+      onClick={(e) => onActivate(e)}
       onDoubleClick={() => {
         if (entry.is_dir) onNavigate()
       }}
@@ -80,12 +80,16 @@ export function FileRow({
         )}
       </span>
 
-      <div className="w-28 h-1.5 rounded-full bg-[var(--color-bg-primary)] shrink-0 overflow-hidden">
+      <div className="w-20 h-1.5 rounded-full bg-[var(--color-bg-primary)] shrink-0 overflow-hidden">
         <div
           className="h-full rounded-full transition-all duration-200"
           style={{ width: `${barWidth}%`, backgroundColor: color }}
         />
       </div>
+
+      <span className="text-[10px] text-[var(--color-text-tertiary)] w-20 text-right shrink-0 tabular-nums truncate">
+        {entry.modified > 0 ? formatDate(entry.modified) : '—'}
+      </span>
 
       <span className="text-xs text-[var(--color-text-secondary)] w-16 text-right shrink-0 tabular-nums">
         {formatSize(entry.size)}

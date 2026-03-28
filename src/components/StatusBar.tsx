@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect, useRef } from 'react'
-import { Trash2, Loader2, XCircle } from 'lucide-react'
+import { Trash2, Loader2, XCircle, CheckCircle2 } from 'lucide-react'
 import { useStore } from '../state/store'
 import { formatSize } from '../state/helpers'
 import { useTrash, useScan } from '../hooks/useTauri'
@@ -27,6 +27,16 @@ export function StatusBar() {
     }
     return () => { if (intervalRef.current) clearInterval(intervalRef.current) }
   }, [scanning])
+
+  // Scan completion highlight — true for 4s after scan finishes
+  const [scanJustCompleted, setScanJustCompleted] = useState(false)
+  useEffect(() => {
+    if (!scanning && scanTime !== null) {
+      setScanJustCompleted(true)
+      const timer = setTimeout(() => setScanJustCompleted(false), 4000)
+      return () => clearTimeout(timer)
+    }
+  }, [scanning, scanTime])
 
   const totalSize = useMemo(
     () => viewEntries.reduce((sum, e) => sum + e.size, 0),
@@ -57,10 +67,15 @@ export function StatusBar() {
           <Loader2 size={12} className="animate-spin" />
           Scanning… {scanProgress ? `${scanProgress.scanned_count.toLocaleString()} items` : ''}{elapsed > 0 ? ` · ${elapsed}s` : ''}
         </span>
+      ) : scanJustCompleted ? (
+        <span className="flex items-center gap-1.5 text-xs text-[var(--color-success)] scan-complete-highlight">
+          <CheckCircle2 size={12} />
+          Scan complete — {viewEntries.length.toLocaleString()} items, {formatSize(totalSize)}{scanTime !== null ? `, ${scanTime.toFixed(1)}s` : ''}
+        </span>
       ) : (
-        <span className={`text-xs text-[var(--color-text-tertiary)] ${scanTime !== null ? 'scan-complete-pulse' : ''}`}>
+        <span className="text-xs text-[var(--color-text-tertiary)]">
           {viewEntries.length.toLocaleString()} items · {formatSize(totalSize)}
-          {scanTime !== null && ` · Scanned in ${scanTime.toFixed(1)}s`}
+          {scanTime !== null && ` · ${scanTime.toFixed(1)}s`}
         </span>
       )}
 

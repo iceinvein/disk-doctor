@@ -21,7 +21,7 @@ impl ScanState {
         let conn = Connection::open(&db_path).expect("Failed to open database");
         db::init_db(&conn).expect("Failed to initialize database");
         let read_conn = db::open_read_connection().expect("Failed to open read connection");
-        eprintln!("[db] opened database at {:?}", db_path);
+        log!(Db, "opened database at {:?}", db_path);
 
         Self {
             cancelled: Arc::new(AtomicBool::new(false)),
@@ -69,7 +69,7 @@ pub async fn scan_directory(
 
         *state.current_scan_id.lock().unwrap() = Some(scan_id);
 
-        eprintln!("[cmd] scan_directory: created scan_id={} for path={}", scan_id, path);
+        log!(Cmd, "scan_directory: created scan_id={} for path={}", scan_id, path);
 
         (
             Arc::clone(&state.cancelled),
@@ -98,7 +98,7 @@ pub fn cancel_scan(scan_state: State<'_, Mutex<ScanState>>) {
 #[tauri::command]
 pub fn set_view_path(path: String, scan_state: State<'_, Mutex<ScanState>>) {
     if let Ok(state) = scan_state.lock() {
-        eprintln!("[cmd] set_view_path -> {}", path);
+        log!(Cmd, "set_view_path -> {}", path);
         *state.view_path.lock().unwrap() = path;
     }
 }
@@ -126,12 +126,7 @@ pub fn get_children(
         None => (path.clone(), 0, String::new()),
     };
 
-    eprintln!(
-        "[cmd] get_children({}) -> {} entries, parent_size={}",
-        path,
-        entries.len(),
-        parent_size
-    );
+    log!(Cmd, "get_children({}) → {} entries, parent_size={}", path, entries.len(), parent_size);
 
     Ok(ViewUpdate {
         entries,
@@ -243,10 +238,7 @@ pub fn load_scan(
     *state.current_scan_id.lock().unwrap() = Some(scan_id);
     *state.view_path.lock().unwrap() = meta.root_path.clone();
 
-    eprintln!(
-        "[cmd] load_scan: loaded scan_id={}, root={}",
-        scan_id, meta.root_path
-    );
+    log!(Cmd, "load_scan: loaded scan_id={}, root={}", scan_id, meta.root_path);
 
     Ok(meta)
 }

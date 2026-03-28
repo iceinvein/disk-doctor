@@ -27,7 +27,7 @@ pub fn scan_directory(
         return Err(format!("Path does not exist: {}", root));
     }
 
-    eprintln!("[scan] starting parallel scan of: {}", root);
+    log!(Scan, "starting parallel scan of: {}", root);
     let scan_start = Instant::now();
 
     let scanned_count = Arc::new(AtomicU32::new(0));
@@ -125,11 +125,8 @@ pub fn scan_directory(
         }
     }
 
-    eprintln!(
-        "[scan] discovered {} dirs + {} other entries at top level",
-        child_dirs.len(),
-        scanned_count.load(Ordering::Relaxed)
-    );
+    log!(Scan, "discovered {} dirs + {} other entries at top level",
+        child_dirs.len(), scanned_count.load(Ordering::Relaxed));
 
     // --- Emitter thread: uses its own read connection (WAL = no lock contention) ---
     let emitter_handle = {
@@ -144,7 +141,7 @@ pub fn scan_directory(
             let read_conn = match db::open_read_connection() {
                 Ok(c) => c,
                 Err(e) => {
-                    eprintln!("[scan] failed to open read connection: {}", e);
+                    log!(Scan, "failed to open read connection: {}", e);
                     return;
                 }
             };
@@ -176,14 +173,8 @@ pub fn scan_directory(
 
                 emit_count += 1;
                 let count = scanned_count.load(Ordering::Relaxed);
-                eprintln!(
-                    "[scan] emit view-update #{}: {} entries at '{}', {} total items, interval={}ms",
-                    emit_count,
-                    entries.len(),
-                    parent_name,
-                    count,
-                    interval
-                );
+                log!(Scan, "emit view-update #{}: {} entries at '{}', {} total items, interval={}ms",
+                    emit_count, entries.len(), parent_name, count, interval);
 
                 let update = ViewUpdate {
                     entries,
@@ -293,10 +284,8 @@ pub fn scan_directory(
 
     let count = scanned_count.load(Ordering::Relaxed);
     let scan_time = scan_start.elapsed().as_secs_f64();
-    eprintln!(
-        "[scan] complete: {} items in {:.1}s, {} child dirs",
-        count, scan_time, child_dirs.len()
-    );
+    log!(Scan, "complete: {} items in {:.1}s, {} child dirs",
+        count, scan_time, child_dirs.len());
 
     // Final progress
     let _ = app_handle.emit(
@@ -309,17 +298,14 @@ pub fn scan_directory(
 
     // Compute folder sizes bottom-up BEFORE emitting final view-update
     {
-        eprintln!("[scan] computing folder sizes...");
+        log!(Scan, "computing folder sizes...");
         let size_start = Instant::now();
         let conn = db.lock().unwrap();
         db::compute_folder_sizes(&conn, scan_id)
             .map_err(|e| format!("Failed to compute folder sizes: {}", e))?;
         db::complete_scan(&conn, scan_id, scan_time)
             .map_err(|e| format!("Failed to complete scan: {}", e))?;
-        eprintln!(
-            "[scan] folder sizes computed in {:.1}s",
-            size_start.elapsed().as_secs_f64()
-        );
+        log!(Perf, "folder sizes computed in {:.1}s", size_start.elapsed().as_secs_f64());
     }
 
     // Emit final view-update so frontend gets the complete picture with accurate sizes
@@ -344,11 +330,7 @@ pub fn scan_directory(
             total_scanned: count,
         };
 
-        eprintln!(
-            "[scan] emit final view-update: {} entries at '{}'",
-            update.entries.len(),
-            parent_name
-        );
+        log!(Scan, "emit final view-update: {} entries at '{}'", update.entries.len(), parent_name);
         let _ = app_handle.emit("view-update", &update);
     }
 

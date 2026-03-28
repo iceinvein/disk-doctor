@@ -9,6 +9,7 @@ import { FileList } from './components/FileList'
 import { DetailPanel } from './components/DetailPanel'
 import { StatusBar } from './components/StatusBar'
 import { PermissionGuide } from './components/PermissionGuide'
+import { ShortcutOverlay } from './components/ShortcutOverlay'
 
 export default function App() {
   const rootPath = useStore(s => s.rootPath)
@@ -17,15 +18,20 @@ export default function App() {
   const deselectAll = useStore(s => s.deselectAll)
   const setActive = useStore(s => s.setActive)
   const setError = useStore(s => s.setError)
+  const toggleShortcuts = useStore(s => s.toggleShortcuts)
   const { navigateBack } = useNavigation()
 
   // Global event listeners — always mounted, survive component swaps
   useScanEvents()
 
-  // Keyboard navigation
+  // Keyboard navigation and shortcuts
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
-      if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
+      // Skip if user is typing in an input field
+      const target = e.target as HTMLElement
+      const isInput = target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable
+
+      if (e.key === 'ArrowLeft' || (e.key === 'Backspace' && !isInput)) {
         if (useStore.getState().breadcrumbs.length > 1) {
           navigateBack()
         }
@@ -34,11 +40,43 @@ export default function App() {
         deselectAll()
         setActive(null)
       }
+
+      // Cmd+A: select all
+      if (e.metaKey && e.key === 'a' && !isInput) {
+        e.preventDefault()
+        useStore.getState().selectAll()
+      }
+
+      // Cmd+Backspace: trash selected
+      if (e.metaKey && e.key === 'Backspace') {
+        const { selectedPaths } = useStore.getState()
+        if (selectedPaths.size > 0) {
+          e.preventDefault()
+          // Click the trash button in the StatusBar to trigger its confirmation dialog
+          const trashBtn = document.querySelector('[data-batch-trash]') as HTMLButtonElement | null
+          trashBtn?.click()
+        }
+      }
+
+      // Cmd+F: focus search input
+      if (e.metaKey && e.key === 'f') {
+        e.preventDefault()
+        const searchInput = document.getElementById('search-filter-input') as HTMLInputElement | null
+        if (searchInput) {
+          searchInput.focus()
+          searchInput.select()
+        }
+      }
+
+      // ?: toggle keyboard shortcut overlay (only when not typing in an input)
+      if (e.key === '?' && !isInput && !e.metaKey && !e.ctrlKey) {
+        toggleShortcuts()
+      }
     }
 
     window.addEventListener('keydown', handleKeyDown)
     return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [navigateBack, deselectAll, setActive])
+  }, [navigateBack, deselectAll, setActive, toggleShortcuts])
 
   return (
     <div className="flex flex-col h-screen bg-[var(--color-bg-primary)]">
@@ -58,6 +96,8 @@ export default function App() {
       ) : (
         <WelcomeScreen />
       )}
+
+      <ShortcutOverlay />
 
       {/* Error toast */}
       {error && (

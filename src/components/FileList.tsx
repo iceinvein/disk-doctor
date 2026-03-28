@@ -1,10 +1,19 @@
-import { useRef, useMemo } from 'react'
+import { useRef, useMemo, useState, useCallback } from 'react'
 import { useVirtualizer } from '@tanstack/react-virtual'
 import { useStore } from '../state/store'
 import { sortEntries } from '../state/helpers'
-import { useNavigation } from '../hooks/useTauri'
+import { useNavigation, useTrash } from '../hooks/useTauri'
 import { FileRow } from './FileRow'
-import type { SortField } from '../state/types'
+import { ContextMenu } from './ContextMenu'
+import { ConfirmDialog } from './ConfirmDialog'
+import { formatSize } from '../state/helpers'
+import type { DirEntry, SortField } from '../state/types'
+
+type ContextMenuState = {
+  entry: DirEntry
+  x: number
+  y: number
+} | null
 
 export function FileList() {
   const viewEntries = useStore(s => s.viewEntries)
@@ -16,16 +25,37 @@ export function FileList() {
   const setActive = useStore(s => s.setActive)
   const toggleSelected = useStore(s => s.toggleSelected)
   const setSort = useStore(s => s.setSort)
+  const searchQuery = useStore(s => s.searchQuery)
   const parentRef = useRef<HTMLDivElement>(null)
 
   const scanning = useStore(s => s.scanning)
   const { navigateInto } = useNavigation()
+  const { trashItems } = useTrash()
 
-  const entries = useMemo(() => {
+  const [contextMenu, setContextMenu] = useState<ContextMenuState>(null)
+  const [trashConfirm, setTrashConfirm] = useState<DirEntry | null>(null)
+
+  const sorted = useMemo(() => {
     // Skip client-side sort during scanning — Rust already sorts by size desc
     if (scanning) return viewEntries
     return sortEntries(viewEntries, sortBy, sortDir)
   }, [viewEntries, sortBy, sortDir, scanning])
+
+  const entries = useMemo(() => {
+    if (!searchQuery) return sorted
+    const q = searchQuery.toLowerCase()
+    return sorted.filter(e => e.name.toLowerCase().includes(q))
+  }, [sorted, searchQuery])
+
+  const handleContextMenuTrash = useCallback((entry: DirEntry) => {
+    setTrashConfirm(entry)
+  }, [])
+
+  const handleConfirmTrash = useCallback(async () => {
+    if (!trashConfirm) return
+    setTrashConfirm(null)
+    await trashItems([trashConfirm.path])
+  }, [trashConfirm, trashItems])
 
   const maxSize = useMemo(
     () => entries.reduce((max, e) => Math.max(max, e.size), 0),
@@ -71,7 +101,9 @@ export function FileList() {
 
         <button
           onClick={() => handleSort('name')}
-          className="text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] truncate min-w-0 flex-1 text-left cursor-pointer"
+          className={`text-xs font-medium truncate min-w-0 flex-1 text-left cursor-pointer hover:text-[var(--color-text-primary)] ${
+            sortBy === 'name' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
+          }`}
         >
           Name{sortIndicator('name')}
         </button>
@@ -81,10 +113,15 @@ export function FileList() {
 
         <button
           onClick={() => handleSort('size')}
-          className="text-xs font-medium text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] w-16 text-right shrink-0 cursor-pointer"
+          className={`text-xs font-medium w-16 text-right shrink-0 cursor-pointer hover:text-[var(--color-text-primary)] ${
+            sortBy === 'size' ? 'text-[var(--color-text-primary)]' : 'text-[var(--color-text-secondary)]'
+          }`}
         >
           Size{sortIndicator('size')}
         </button>
+
+        {/* Spacer for chevron */}
+        <div className="w-3.5 shrink-0" />
       </div>
 
       {/* Virtualized list */}
@@ -115,12 +152,34 @@ export function FileList() {
                   onActivate={() => setActive(entry.path)}
                   onToggleSelect={() => toggleSelected(entry.path)}
                   onNavigate={() => navigateInto(entry)}
+                  onContextMenu={(pos) => setContextMenu({ entry, x: pos.x, y: pos.y })}
                 />
               </div>
             )
           })}
         </div>
       </div>
+
+      {contextMenu && (
+        <ContextMenu
+          x={contextMenu.x}
+          y={contextMenu.y}
+          entry={contextMenu.entry}
+          onClose={() => setContextMenu(null)}
+          onNavigate={() => navigateInto(contextMenu.entry)}
+          onTrash={() => handleContextMenuTrash(contextMenu.entry)}
+        />
+      )}
+
+      {trashConfirm && (
+        <ConfirmDialog
+          title="Move to Trash"
+          message={`"${trashConfirm.name}" (${formatSize(trashConfirm.size)}) will be moved to the Trash. You can recover it from the Trash later.`}
+          confirmLabel="Move to Trash"
+          onConfirm={handleConfirmTrash}
+          onCancel={() => setTrashConfirm(null)}
+        />
+      )}
     </div>
   )
 }

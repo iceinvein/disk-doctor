@@ -1,9 +1,11 @@
-import { ChevronLeft, ChevronRight, HardDrive, FolderSearch } from 'lucide-react'
+import { ChevronLeft, ChevronRight, HardDrive, FolderSearch, Search } from 'lucide-react'
 import { useStore } from '../state/store'
 import { useScan, useNavigation } from '../hooks/useTauri'
 
 export function Toolbar() {
   const breadcrumbs = useStore(s => s.breadcrumbs)
+  const searchQuery = useStore(s => s.searchQuery)
+  const setSearchQuery = useStore(s => s.setSearchQuery)
   const { navigateBack, navigateToBreadcrumb } = useNavigation()
   const { scanFolder } = useScan()
 
@@ -67,6 +69,18 @@ export function Toolbar() {
           )
         })}
       </nav>
+
+      <div className="relative shrink-0">
+        <Search size={12} className="absolute left-2 top-1/2 -translate-y-1/2 text-[var(--color-text-tertiary)] pointer-events-none" />
+        <input
+          id="search-filter-input"
+          type="text"
+          placeholder="Filter..."
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          className="w-40 h-7 pl-6 pr-2 text-xs rounded-md bg-[var(--color-bg-primary)] border border-[var(--color-border)] text-[var(--color-text-primary)] placeholder:text-[var(--color-text-tertiary)] focus:outline-none focus:border-[var(--color-accent)] transition-colors"
+        />
+      </div>
 
       <button
         onClick={scanFolder}

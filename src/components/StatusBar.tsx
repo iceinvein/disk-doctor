@@ -62,6 +62,7 @@ export function StatusBar() {
         </button>
       ) : selectedCount > 0 ? (
         <button
+          data-batch-trash
           onClick={() => setShowConfirm(true)}
           className="flex items-center gap-1.5 text-xs text-[var(--color-danger)] hover:brightness-125 transition-all cursor-pointer"
         >

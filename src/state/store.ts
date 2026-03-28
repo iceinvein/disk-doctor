@@ -25,6 +25,8 @@ type AppStore = {
   // UI
   error: string | null
   showPermissionGuide: boolean
+  searchQuery: string
+  showShortcuts: boolean
 
   // Actions
   initScan: (rootPath: string, rootName: string) => void
@@ -42,6 +44,8 @@ type AppStore = {
   removePaths: (paths: string[]) => void
   setError: (error: string | null) => void
   showPermission: (show: boolean) => void
+  setSearchQuery: (query: string) => void
+  toggleShortcuts: () => void
   reset: () => void
 }
 
@@ -60,6 +64,8 @@ const initialState = {
   scanTime: null as number | null,
   error: null as string | null,
   showPermissionGuide: false,
+  searchQuery: '',
+  showShortcuts: false,
 }
 
 export const useStore = create<AppStore>((set, get) => ({
@@ -156,6 +162,10 @@ export const useStore = create<AppStore>((set, get) => ({
   setError: (error) => set({ error, scanning: false }),
 
   showPermission: (show) => set({ showPermissionGuide: show }),
+
+  setSearchQuery: (query) => set({ searchQuery: query }),
+
+  toggleShortcuts: () => set({ showShortcuts: !get().showShortcuts }),
 
   reset: () => set(initialState),
 }))

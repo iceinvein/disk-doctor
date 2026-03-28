@@ -69,7 +69,7 @@ export function DetailPanel() {
           )}
           {percentOfParent !== null && (
             <div className="flex justify-between">
-              <span className="text-[var(--color-text-tertiary)]">% of parent</span>
+              <span className="text-[var(--color-text-tertiary)]">Portion</span>
               <span className="text-[var(--color-text-primary)] tabular-nums">{percentOfParent}%</span>
             </div>
           )}

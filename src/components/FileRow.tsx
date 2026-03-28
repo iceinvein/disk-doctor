@@ -1,4 +1,4 @@
-import { Folder, File, FileText, Image, Music, Archive, Link, Lock, Download, BookOpen, Monitor, FileCode } from 'lucide-react'
+import { Folder, File, FileText, Image, Music, Archive, Link, Lock, Download, BookOpen, Monitor, FileCode, ChevronRight } from 'lucide-react'
 import type { LucideIcon } from 'lucide-react'
 import type { DirEntry } from '../state/types'
 import { formatSize } from '../state/helpers'
@@ -11,6 +11,7 @@ type FileRowProps = {
   onActivate: () => void
   onToggleSelect: () => void
   onNavigate: () => void
+  onContextMenu: (pos: { x: number; y: number }) => void
 }
 
 type FileCategory = 'folder' | 'media' | 'audio' | 'archive' | 'code' | 'document' | 'system' | 'other'
@@ -81,6 +82,7 @@ export function FileRow({
   onActivate,
   onToggleSelect,
   onNavigate,
+  onContextMenu,
 }: FileRowProps) {
   const barWidth = maxSize > 0 ? (entry.size / maxSize) * 100 : 0
   const category = getCategory(entry)
@@ -97,6 +99,10 @@ export function FileRow({
       onClick={onActivate}
       onDoubleClick={() => {
         if (entry.is_dir) onNavigate()
+      }}
+      onContextMenu={(e) => {
+        e.preventDefault()
+        onContextMenu({ x: e.clientX, y: e.clientY })
       }}
     >
       <input
@@ -115,7 +121,7 @@ export function FileRow({
       <span className="text-sm text-[var(--color-text-primary)] truncate min-w-0 flex-1">
         {entry.name}
         {entry.is_restricted && (
-          <span className="text-xs text-[var(--color-text-tertiary)] ml-1.5">
+          <span className="text-xs text-[var(--color-text-tertiary)] ml-1.5" title="Permission denied — cannot read this folder">
             restricted
           </span>
         )}
@@ -131,6 +137,12 @@ export function FileRow({
       <span className="text-xs text-[var(--color-text-secondary)] w-16 text-right shrink-0 tabular-nums">
         {formatSize(entry.size)}
       </span>
+
+      {entry.is_dir ? (
+        <ChevronRight size={14} className="text-[var(--color-text-tertiary)] shrink-0" />
+      ) : (
+        <div className="w-3.5 shrink-0" />
+      )}
     </div>
   )
 }

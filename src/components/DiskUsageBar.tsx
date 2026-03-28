@@ -38,7 +38,17 @@ export function DiskUsageBar() {
 
       {/* Labels */}
       <div className="flex justify-between text-[10px] text-[var(--color-text-tertiary)]">
-        <span>{formatSize(usage.used)} used of {formatSize(usage.total)}</span>
+        <span className="flex items-center gap-2">
+          {formatSize(usage.used)} used of {formatSize(usage.total)}
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-accent)] inline-block" />
+            Scanned
+          </span>
+          <span className="flex items-center gap-1">
+            <span className="w-1.5 h-1.5 rounded-full bg-[var(--color-text-tertiary)] opacity-30 inline-block" />
+            Other
+          </span>
+        </span>
         <span>{formatSize(usage.free)} available</span>
       </div>
     </div>

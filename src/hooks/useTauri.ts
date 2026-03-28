@@ -17,6 +17,7 @@ export function useScanEvents() {
 
     function flushTree() {
       if (pendingTree) {
+        console.log(`[scan] RAF flush → applying tree to store`)
         useStore.getState().updateTree(pendingTree)
         pendingTree = null
       }
@@ -27,8 +28,15 @@ export function useScanEvents() {
       useStore.getState().setScanProgress(event.payload)
     })
 
+    let treeUpdateCount = 0
+
     const unlistenTree = listen<DirEntry>('scan-tree-update', (event) => {
-      pendingTree = event.payload
+      treeUpdateCount++
+      const tree = event.payload
+      console.log(
+        `[scan] tree-update #${treeUpdateCount}: ${tree.child_count} children, ${tree.children.filter((c: DirEntry) => c.size > 0).length} with sizes, total=${tree.size}`,
+      )
+      pendingTree = tree
       if (rafId === null) {
         rafId = requestAnimationFrame(flushTree)
       }

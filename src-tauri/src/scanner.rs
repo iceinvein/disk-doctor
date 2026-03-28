@@ -3,7 +3,7 @@ use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
-use std::time::{Instant, UNIX_EPOCH};
+use std::time::{Duration, Instant, UNIX_EPOCH};
 use tauri::{AppHandle, Emitter};
 use walkdir::WalkDir;
 
@@ -17,15 +17,12 @@ struct FlatEntry {
     is_restricted: bool,
 }
 
-/// Parallel scan with adaptive snapshot emissions.
+/// Parallel scan with continuous tree streaming.
 ///
-/// Strategy:
-/// 1. List immediate children of root (fast read_dir)
-/// 2. Scan each child directory in parallel using rayon
-/// 3. Emit periodic tree snapshots with adaptive intervals:
-///    - <10K entries: every 500ms (fast feedback)
-///    - 10K-100K: every 1s (reduce rebuild cost)
-///    - >100K: every 2s (avoid spending more time building trees than scanning)
+/// All parallel walkers push flat entries into a shared Vec. A dedicated
+/// emitter thread periodically builds a tree snapshot from ALL entries
+/// collected so far and emits it. This gives deep streaming at every
+/// level, even within large directories.
 pub fn scan_directory(
     root: &str,
     app_handle: &AppHandle,
@@ -36,46 +33,60 @@ pub fn scan_directory(
         return Err(format!("Path does not exist: {}", root));
     }
 
+    eprintln!("[scan] starting parallel scan of: {}", root);
+    let scan_start = Instant::now();
+
+    // Shared flat entry storage — all threads push here
+    let entries: Arc<Mutex<Vec<FlatEntry>>> = Arc::new(Mutex::new(Vec::new()));
+    let scanned_count = Arc::new(AtomicU32::new(0));
+    let done = Arc::new(AtomicBool::new(false));
+
+    // Add root entry first (build_tree needs it)
+    let root_modified = std::fs::metadata(root_path)
+        .ok()
+        .and_then(|m| m.modified().ok())
+        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
+        .unwrap_or(0);
     let root_name = root_path
         .file_name()
         .unwrap_or(root_path.as_os_str())
         .to_string_lossy()
         .to_string();
 
-    let root_modified = std::fs::metadata(root_path)
-        .ok()
-        .and_then(|m| m.modified().ok())
-        .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-        .unwrap_or(0);
+    {
+        let mut e = entries.lock().unwrap();
+        e.push(FlatEntry {
+            path: root.to_string(),
+            name: root_name,
+            size: 0,
+            is_dir: true,
+            modified: root_modified,
+            is_symlink: false,
+            is_restricted: false,
+        });
+    }
 
-    // Collect immediate children
-    let read_dir = std::fs::read_dir(root_path).map_err(|e| e.to_string())?;
+    // Discover immediate children for parallel dispatch
     let mut child_dirs: Vec<String> = Vec::new();
-    let mut file_entries: Vec<DirEntry> = Vec::new();
+    if let Ok(read_dir) = std::fs::read_dir(root_path) {
+        for dir_entry_result in read_dir {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+            let dir_entry = match dir_entry_result {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
 
-    for dir_entry_result in read_dir {
-        if cancelled.load(Ordering::Relaxed) {
-            break;
-        }
+            let child_path = dir_entry.path();
+            let child_path_str = child_path.to_string_lossy().to_string();
+            let child_name = dir_entry.file_name().to_string_lossy().to_string();
+            let ft = dir_entry.file_type().ok();
+            let is_symlink = ft.map(|f| f.is_symlink()).unwrap_or(false);
+            let is_dir = ft.map(|f| f.is_dir()).unwrap_or(false);
 
-        let dir_entry = match dir_entry_result {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let child_path = dir_entry.path();
-        let child_path_str = child_path.to_string_lossy().to_string();
-        let child_name = dir_entry.file_name().to_string_lossy().to_string();
-
-        let ft = dir_entry.file_type().ok();
-        let is_symlink = ft.map(|f| f.is_symlink()).unwrap_or(false);
-        let is_dir = ft.map(|f| f.is_dir()).unwrap_or(false);
-
-        if is_dir && !is_symlink {
-            child_dirs.push(child_path_str);
-        } else {
             let meta = dir_entry.metadata().ok();
-            let size = if is_symlink {
+            let size = if is_dir || is_symlink {
                 0
             } else {
                 meta.as_ref().map(|m| m.len()).unwrap_or(0)
@@ -86,71 +97,168 @@ pub fn scan_directory(
                 .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
                 .unwrap_or(0);
 
-            file_entries.push(DirEntry {
-                path: child_path_str,
-                name: child_name,
-                size,
-                is_dir: false,
-                child_count: 0,
-                modified,
-                is_symlink,
-                is_restricted: meta.is_none(),
-                children: vec![],
-            });
+            // Add to shared entries immediately
+            {
+                let mut e = entries.lock().unwrap();
+                e.push(FlatEntry {
+                    path: child_path_str.clone(),
+                    name: child_name,
+                    size,
+                    is_dir,
+                    modified,
+                    is_symlink,
+                    is_restricted: !is_symlink && meta.is_none(),
+                });
+            }
+            scanned_count.fetch_add(1, Ordering::Relaxed);
+
+            if is_dir && !is_symlink {
+                child_dirs.push(child_path_str);
+            }
         }
     }
 
-    // Shared state for parallel scanning
-    let scanned_count = Arc::new(AtomicU32::new(file_entries.len() as u32));
-    let completed_dirs: Arc<Mutex<Vec<DirEntry>>> = Arc::new(Mutex::new(Vec::new()));
-    let last_tree_emit = Arc::new(Mutex::new(Instant::now()));
-    let last_progress_emit = Arc::new(Mutex::new(Instant::now()));
+    eprintln!(
+        "[scan] discovered {} dirs + {} other entries at top level",
+        child_dirs.len(),
+        scanned_count.load(Ordering::Relaxed)
+    );
 
-    // Scan each child directory in parallel with rayon
+    // --- Emitter thread: periodically builds + emits tree snapshots ---
+    let emitter_handle = {
+        let entries = entries.clone();
+        let done = done.clone();
+        let cancelled = cancelled.clone();
+        let scanned_count = scanned_count.clone();
+        let app_handle = app_handle.clone();
+        let root_str = root.to_string();
+
+        std::thread::spawn(move || {
+            let mut emit_count: u32 = 0;
+
+            loop {
+                let count = scanned_count.load(Ordering::Relaxed);
+                let interval = adaptive_interval(count);
+                std::thread::sleep(Duration::from_millis(interval));
+
+                if done.load(Ordering::Relaxed) || cancelled.load(Ordering::Relaxed) {
+                    break;
+                }
+
+                // Build tree from current entries (holds lock during build)
+                let tree = {
+                    let e = entries.lock().unwrap();
+                    build_tree(&root_str, &e)
+                };
+
+                if let Ok(tree) = tree {
+                    emit_count += 1;
+                    let count = scanned_count.load(Ordering::Relaxed);
+                    eprintln!(
+                        "[scan] emit tree-update #{}: {} top children, {} total items, interval={}ms",
+                        emit_count, tree.child_count, count, interval
+                    );
+                    let _ = app_handle.emit("scan-tree-update", &tree);
+                }
+
+                // Also emit progress
+                let count = scanned_count.load(Ordering::Relaxed);
+                let _ = app_handle.emit(
+                    "scan-progress",
+                    ScanProgress {
+                        scanned_count: count,
+                        current_path: String::new(),
+                    },
+                );
+            }
+        })
+    };
+
+    // --- Parallel walkers: scan each child dir, flush to shared entries ---
     child_dirs.par_iter().for_each(|dir_path| {
         if cancelled.load(Ordering::Relaxed) {
             return;
         }
 
-        let subtree = scan_subtree(
-            dir_path,
-            &cancelled,
-            &scanned_count,
-            app_handle,
-            &last_progress_emit,
-        );
+        let mut local_buf: Vec<FlatEntry> = Vec::new();
+        let mut local_count: u32 = 0;
+        let flush_every = 500;
 
-        // Add completed subtree
-        {
-            let mut dirs = completed_dirs.lock().unwrap();
-            dirs.push(subtree);
+        // Walk this subtree — skip the root dir itself (already added above)
+        for entry in WalkDir::new(dir_path).follow_links(false).min_depth(1) {
+            if cancelled.load(Ordering::Relaxed) {
+                break;
+            }
+
+            let entry = match entry {
+                Ok(e) => e,
+                Err(_) => continue,
+            };
+
+            let path_str = entry.path().to_string_lossy().to_string();
+            let name = entry.file_name().to_string_lossy().to_string();
+            let is_symlink = entry.path_is_symlink();
+            let is_dir = entry.file_type().is_dir();
+
+            let (size, modified, is_restricted) = match entry.metadata() {
+                Ok(meta) => {
+                    let size = if meta.is_file() { meta.len() } else { 0 };
+                    let modified = meta
+                        .modified()
+                        .map(|t| {
+                            t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64
+                        })
+                        .unwrap_or(0);
+                    (size, modified, false)
+                }
+                Err(_) => (0, 0, true),
+            };
+
+            local_buf.push(FlatEntry {
+                path: path_str,
+                name,
+                size,
+                is_dir,
+                modified,
+                is_symlink,
+                is_restricted,
+            });
+            local_count += 1;
+
+            // Flush local buffer to shared entries periodically
+            if local_count >= flush_every {
+                {
+                    let mut shared = entries.lock().unwrap();
+                    shared.append(&mut local_buf);
+                }
+                scanned_count.fetch_add(local_count, Ordering::Relaxed);
+                local_count = 0;
+            }
         }
 
-        // Emit tree snapshot with adaptive interval
-        let count = scanned_count.load(Ordering::Relaxed);
-        let interval_ms = adaptive_interval(count);
-
-        let should_emit = {
-            let last = last_tree_emit.lock().unwrap();
-            last.elapsed().as_millis() >= interval_ms as u128
-        };
-
-        if should_emit {
-            let dirs = completed_dirs.lock().unwrap();
-            let tree = assemble_root(
-                root,
-                &root_name,
-                root_modified,
-                &file_entries,
-                &dirs,
-            );
-            let _ = app_handle.emit("scan-tree-update", &tree);
-            *last_tree_emit.lock().unwrap() = Instant::now();
+        // Flush remaining
+        if !local_buf.is_empty() {
+            let mut shared = entries.lock().unwrap();
+            shared.append(&mut local_buf);
+        }
+        if local_count > 0 {
+            scanned_count.fetch_add(local_count, Ordering::Relaxed);
         }
     });
 
-    // Final progress
+    // Signal emitter to stop
+    done.store(true, Ordering::Relaxed);
+    let _ = emitter_handle.join();
+
     let count = scanned_count.load(Ordering::Relaxed);
+    eprintln!(
+        "[scan] complete: {} items in {:.1}s, {} child dirs",
+        count,
+        scan_start.elapsed().as_secs_f64(),
+        child_dirs.len()
+    );
+
+    // Final progress
     let _ = app_handle.emit(
         "scan-progress",
         ScanProgress {
@@ -160,11 +268,11 @@ pub fn scan_directory(
     );
 
     // Build final tree
-    let dirs = completed_dirs.lock().unwrap();
-    Ok(assemble_root(root, &root_name, root_modified, &file_entries, &dirs))
+    let e = entries.lock().unwrap();
+    build_tree(root, &e)
 }
 
-/// Adaptive snapshot interval: faster updates for small scans, slower for large.
+/// Adaptive snapshot interval based on entry count.
 fn adaptive_interval(entry_count: u32) -> u64 {
     if entry_count < 10_000 {
         500
@@ -172,125 +280,6 @@ fn adaptive_interval(entry_count: u32) -> u64 {
         1000
     } else {
         2000
-    }
-}
-
-/// Assemble the root DirEntry from file entries + completed directory subtrees.
-fn assemble_root(
-    root_path: &str,
-    root_name: &str,
-    root_modified: i64,
-    files: &[DirEntry],
-    dirs: &[DirEntry],
-) -> DirEntry {
-    let mut children: Vec<DirEntry> = Vec::with_capacity(files.len() + dirs.len());
-    children.extend_from_slice(files);
-    children.extend_from_slice(dirs);
-    children.sort_by(|a, b| b.size.cmp(&a.size));
-
-    let total_size: u64 = children.iter().map(|c| c.size).sum();
-
-    DirEntry {
-        path: root_path.to_string(),
-        name: root_name.to_string(),
-        size: total_size,
-        is_dir: true,
-        child_count: children.len() as u32,
-        modified: root_modified,
-        is_symlink: false,
-        is_restricted: false,
-        children,
-    }
-}
-
-/// Scan a single directory subtree using walkdir. Returns a complete DirEntry.
-/// Updates shared scanned_count and emits progress events.
-fn scan_subtree(
-    root: &str,
-    cancelled: &Arc<AtomicBool>,
-    scanned_count: &Arc<AtomicU32>,
-    app_handle: &AppHandle,
-    last_progress_emit: &Arc<Mutex<Instant>>,
-) -> DirEntry {
-    let mut entries: Vec<FlatEntry> = Vec::new();
-
-    for entry in WalkDir::new(root).follow_links(false) {
-        if cancelled.load(Ordering::Relaxed) {
-            break;
-        }
-
-        let entry = match entry {
-            Ok(e) => e,
-            Err(_) => continue,
-        };
-
-        let path_str = entry.path().to_string_lossy().to_string();
-        let name = entry.file_name().to_string_lossy().to_string();
-        let is_symlink = entry.path_is_symlink();
-        let is_dir = entry.file_type().is_dir();
-
-        let (size, modified, is_restricted) = match entry.metadata() {
-            Ok(meta) => {
-                let size = if meta.is_file() { meta.len() } else { 0 };
-                let modified = meta
-                    .modified()
-                    .map(|t| t.duration_since(UNIX_EPOCH).unwrap_or_default().as_secs() as i64)
-                    .unwrap_or(0);
-                (size, modified, false)
-            }
-            Err(_) => (0, 0, true),
-        };
-
-        entries.push(FlatEntry {
-            path: path_str,
-            name,
-            size,
-            is_dir,
-            modified,
-            is_symlink,
-            is_restricted,
-        });
-
-        let count = scanned_count.fetch_add(1, Ordering::Relaxed) + 1;
-
-        // Progress event (throttled, shared across threads)
-        let should_emit = {
-            let last = last_progress_emit.lock().unwrap();
-            last.elapsed().as_millis() >= 100
-        };
-        if should_emit {
-            let progress_path = entry.path().to_string_lossy().to_string();
-            let _ = app_handle.emit(
-                "scan-progress",
-                ScanProgress {
-                    scanned_count: count,
-                    current_path: progress_path,
-                },
-            );
-            *last_progress_emit.lock().unwrap() = Instant::now();
-        }
-    }
-
-    match build_tree(root, &entries) {
-        Ok(tree) => tree,
-        Err(_) => {
-            let name = std::path::Path::new(root)
-                .file_name()
-                .unwrap_or(std::ffi::OsStr::new(root))
-                .to_string_lossy()
-                .to_string();
-            DirEntry {
-                path: root.to_string(),
-                name,
-                size: 0,
-                is_dir: true,
-                child_count: 0,
-                modified: 0,
-                is_symlink: false,
-                is_restricted: true,
-                children: vec![],
-            }
-        }
     }
 }
 

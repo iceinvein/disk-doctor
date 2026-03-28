@@ -52,14 +52,14 @@ export default function App() {
 
         {/* Error toast */}
         {state.error && (
-          <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-red-900/90
-                          text-white px-6 py-3 rounded-lg text-sm max-w-lg z-50
-                          border border-red-700">
+          <div className="fixed bottom-12 left-1/2 -translate-x-1/2 bg-[var(--color-bg-secondary)]
+                          text-[var(--color-text-primary)] px-5 py-3 rounded-xl text-sm max-w-lg z-50
+                          border border-[var(--color-danger)]/30 shadow-lg fade-in">
             <div className="flex items-center gap-3">
-              <span>{state.error}</span>
+              <span className="text-[var(--color-danger)]">{state.error}</span>
               <button
                 onClick={() => dispatch({ type: 'SET_ERROR', error: null })}
-                className="text-red-300 hover:text-white cursor-pointer"
+                className="text-[var(--color-text-tertiary)] hover:text-[var(--color-text-primary)] cursor-pointer transition-colors"
               >
                 ✕
               </button>

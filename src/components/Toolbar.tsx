@@ -1,15 +1,15 @@
 import { ChevronLeft, ChevronRight, HardDrive, FolderSearch } from 'lucide-react'
 import { useStore } from '../state/store'
-import { useScan } from '../hooks/useTauri'
+import { useScan, useNavigation } from '../hooks/useTauri'
 
 export function Toolbar() {
-  const currentPath = useStore(s => s.currentPath)
-  const navigateBack = useStore(s => s.navigateBack)
-  const navigateToBreadcrumb = useStore(s => s.navigateToBreadcrumb)
+  const breadcrumbs = useStore(s => s.breadcrumbs)
+  const { navigateBack, navigateToBreadcrumb } = useNavigation()
   const { scanFolder } = useScan()
 
-  const segments = currentPath
-  const showBack = segments.length > 0
+  const showBack = breadcrumbs.length > 1
+  // Breadcrumb segments (skip the root which gets its own icon)
+  const segments = breadcrumbs.slice(1)
   const maxVisible = 5
   const truncated = segments.length > maxVisible
   const visibleSegments = truncated ? segments.slice(segments.length - maxVisible) : segments
@@ -45,21 +45,22 @@ export function Toolbar() {
         )}
 
         {visibleSegments.map((segment, i) => {
-          const actualIndex = i + indexOffset + 1
-          const isLast = actualIndex === segments.length
+          // actualIndex in the full breadcrumbs array (offset by 1 for root + indexOffset for truncation)
+          const breadcrumbIndex = i + indexOffset + 1
+          const isLast = breadcrumbIndex === breadcrumbs.length - 1
           return (
-            <span key={actualIndex} className="flex items-center gap-0.5 min-w-0">
+            <span key={breadcrumbIndex} className="flex items-center gap-0.5 min-w-0">
               <ChevronRight size={12} className="text-[var(--color-text-tertiary)] shrink-0" />
               {isLast ? (
                 <span className="text-xs text-[var(--color-text-primary)] font-medium truncate" aria-current="page">
-                  {segment}
+                  {segment.name}
                 </span>
               ) : (
                 <button
-                  onClick={() => navigateToBreadcrumb(actualIndex)}
+                  onClick={() => navigateToBreadcrumb(breadcrumbIndex)}
                   className="text-xs text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] truncate cursor-pointer transition-colors"
                 >
-                  {segment}
+                  {segment.name}
                 </button>
               )}
             </span>

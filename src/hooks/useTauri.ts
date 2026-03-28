@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../state/store'
-import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
+import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment } from '../state/types'
 
 /**
  * Set up Tauri event listeners for scan streaming.
@@ -10,16 +10,15 @@ import type { DirEntry, ScanProgress, DiskUsage } from '../state/types'
  */
 export function useScanEvents() {
   useEffect(() => {
-    // Throttle tree updates to animation frames to prevent React jank.
-    // Multiple scan-tree-update events between frames → only the latest is applied.
-    let pendingTree: DirEntry | null = null
+    // Throttle view updates to animation frames to prevent React jank.
+    let pendingUpdate: ViewUpdate | null = null
     let rafId: number | null = null
 
-    function flushTree() {
-      if (pendingTree) {
-        console.log(`[scan] RAF flush → applying tree to store`)
-        useStore.getState().updateTree(pendingTree)
-        pendingTree = null
+    function flushUpdate() {
+      if (pendingUpdate) {
+        console.log(`[scan] RAF flush → applying view-update to store`)
+        useStore.getState().setViewUpdate(pendingUpdate)
+        pendingUpdate = null
       }
       rafId = null
     }
@@ -28,23 +27,23 @@ export function useScanEvents() {
       useStore.getState().setScanProgress(event.payload)
     })
 
-    let treeUpdateCount = 0
+    let viewUpdateCount = 0
 
-    const unlistenTree = listen<DirEntry>('scan-tree-update', (event) => {
-      treeUpdateCount++
-      const tree = event.payload
+    const unlistenViewUpdate = listen<ViewUpdate>('view-update', (event) => {
+      viewUpdateCount++
+      const update = event.payload
       console.log(
-        `[scan] tree-update #${treeUpdateCount}: ${tree.child_count} children, ${tree.children.filter((c: DirEntry) => c.size > 0).length} with sizes, total=${tree.size}`,
+        `[scan] view-update #${viewUpdateCount}: ${update.entries.length} entries at '${update.parent_name}', parent_size=${update.parent_size}, total_scanned=${update.total_scanned}`,
       )
-      pendingTree = tree
+      pendingUpdate = update
       if (rafId === null) {
-        rafId = requestAnimationFrame(flushTree)
+        rafId = requestAnimationFrame(flushUpdate)
       }
     })
 
     return () => {
       unlistenProgress.then((fn) => fn())
-      unlistenTree.then((fn) => fn())
+      unlistenViewUpdate.then((fn) => fn())
       if (rafId !== null) cancelAnimationFrame(rafId)
     }
   }, [])
@@ -52,7 +51,7 @@ export function useScanEvents() {
 
 export function useScan() {
   const initScan = useStore(s => s.initScan)
-  const setTree = useStore(s => s.setTree)
+  const setScanComplete = useStore(s => s.setScanComplete)
   const setError = useStore(s => s.setError)
   const setScanning = useStore(s => s.setScanning)
   const showPermission = useStore(s => s.showPermission)
@@ -66,14 +65,15 @@ export function useScan() {
       initScan(path, name)
 
       const start = performance.now()
-      const tree = await invoke<DirEntry>('scan_directory', { path })
+      await invoke<DirEntry>('scan_directory', { path })
       const scanTime = (performance.now() - start) / 1000
 
-      setTree(tree, scanTime)
+      console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
+      setScanComplete(scanTime)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
-  }, [initScan, setTree, setError])
+  }, [initScan, setScanComplete, setError])
 
   const scanEntireDisk = useCallback(async () => {
     try {
@@ -86,14 +86,15 @@ export function useScan() {
       initScan('/', 'Macintosh HD')
 
       const start = performance.now()
-      const tree = await invoke<DirEntry>('scan_directory', { path: '/' })
+      await invoke<DirEntry>('scan_directory', { path: '/' })
       const scanTime = (performance.now() - start) / 1000
 
-      setTree(tree, scanTime)
+      console.log(`[scan] complete in ${scanTime.toFixed(1)}s`)
+      setScanComplete(scanTime)
     } catch (error) {
       setError(error instanceof Error ? error.message : String(error))
     }
-  }, [initScan, setTree, setError, showPermission])
+  }, [initScan, setScanComplete, setError, showPermission])
 
   const cancelScan = useCallback(async () => {
     try {
@@ -105,6 +106,57 @@ export function useScan() {
   }, [setScanning])
 
   return { scanFolder, scanEntireDisk, cancelScan }
+}
+
+/**
+ * Navigation functions that coordinate store state + Rust IPC.
+ */
+export function useNavigation() {
+  const setViewEntries = useStore(s => s.setViewEntries)
+  const setBreadcrumbs = useStore(s => s.setBreadcrumbs)
+
+  const navigateTo = useCallback(
+    async (path: string, breadcrumbs: BreadcrumbSegment[]) => {
+      console.log(`[nav] navigateTo: ${path}`)
+      await invoke('set_view_path', { path })
+      const result = await invoke<ViewUpdate>('get_children', { path })
+      console.log(
+        `[nav] got ${result.entries.length} children, parent_size=${result.parent_size}`,
+      )
+      setBreadcrumbs(breadcrumbs)
+      setViewEntries(result.entries, result.parent_size)
+    },
+    [setViewEntries, setBreadcrumbs],
+  )
+
+  const navigateInto = useCallback(
+    async (entry: DirEntry) => {
+      const currentBreadcrumbs = useStore.getState().breadcrumbs
+      const newBreadcrumbs = [...currentBreadcrumbs, { name: entry.name, path: entry.path }]
+      await navigateTo(entry.path, newBreadcrumbs)
+    },
+    [navigateTo],
+  )
+
+  const navigateBack = useCallback(async () => {
+    const { breadcrumbs } = useStore.getState()
+    if (breadcrumbs.length <= 1) return
+    const newBreadcrumbs = breadcrumbs.slice(0, -1)
+    const target = newBreadcrumbs[newBreadcrumbs.length - 1]
+    await navigateTo(target.path, newBreadcrumbs)
+  }, [navigateTo])
+
+  const navigateToBreadcrumb = useCallback(
+    async (index: number) => {
+      const { breadcrumbs } = useStore.getState()
+      const newBreadcrumbs = breadcrumbs.slice(0, index + 1)
+      const target = newBreadcrumbs[newBreadcrumbs.length - 1]
+      await navigateTo(target.path, newBreadcrumbs)
+    },
+    [navigateTo],
+  )
+
+  return { navigateInto, navigateBack, navigateToBreadcrumb }
 }
 
 export function useTrash() {

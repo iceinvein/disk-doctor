@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { useStore } from './state/store'
-import { useScanEvents } from './hooks/useTauri'
+import { useScanEvents, useNavigation } from './hooks/useTauri'
 import { WelcomeScreen } from './components/WelcomeScreen'
 import { Titlebar } from './components/Titlebar'
 import { Toolbar } from './components/Toolbar'
@@ -11,13 +11,13 @@ import { StatusBar } from './components/StatusBar'
 import { PermissionGuide } from './components/PermissionGuide'
 
 export default function App() {
-  const tree = useStore(s => s.tree)
+  const rootPath = useStore(s => s.rootPath)
   const showPermissionGuide = useStore(s => s.showPermissionGuide)
   const error = useStore(s => s.error)
-  const navigateBack = useStore(s => s.navigateBack)
   const deselectAll = useStore(s => s.deselectAll)
   const setActive = useStore(s => s.setActive)
   const setError = useStore(s => s.setError)
+  const { navigateBack } = useNavigation()
 
   // Global event listeners — always mounted, survive component swaps
   useScanEvents()
@@ -26,7 +26,7 @@ export default function App() {
   useEffect(() => {
     function handleKeyDown(e: KeyboardEvent) {
       if (e.key === 'ArrowLeft' || e.key === 'Backspace') {
-        if (useStore.getState().currentPath.length > 0) {
+        if (useStore.getState().breadcrumbs.length > 1) {
           navigateBack()
         }
       }
@@ -43,7 +43,7 @@ export default function App() {
   return (
     <div className="flex flex-col h-screen bg-[var(--color-bg-primary)]">
       <Titlebar />
-      {tree ? (
+      {rootPath ? (
         <>
           <Toolbar />
           <DiskUsageBar />

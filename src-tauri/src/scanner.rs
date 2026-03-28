@@ -1,4 +1,4 @@
-use crate::types::{DirEntry, DiskUsage, ScanProgress};
+use crate::types::{DirEntry, DiskUsage, ScanProgress, ViewUpdate};
 use rayon::prelude::*;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -17,16 +17,49 @@ struct FlatEntry {
     is_restricted: bool,
 }
 
-/// Parallel scan with continuous tree streaming.
+/// Find a node in the tree by its path (recursive DFS).
+pub fn find_node<'a>(tree: &'a DirEntry, path: &str) -> Option<&'a DirEntry> {
+    if tree.path == path {
+        return Some(tree);
+    }
+    for child in &tree.children {
+        if let Some(found) = find_node(child, path) {
+            return Some(found);
+        }
+    }
+    None
+}
+
+/// Extract shallow children (children with empty children) from a node.
+fn shallow_children(node: &DirEntry) -> Vec<DirEntry> {
+    node.children
+        .iter()
+        .map(|c| DirEntry {
+            path: c.path.clone(),
+            name: c.name.clone(),
+            size: c.size,
+            is_dir: c.is_dir,
+            child_count: c.child_count,
+            modified: c.modified,
+            is_symlink: c.is_symlink,
+            is_restricted: c.is_restricted,
+            children: vec![], // Don't send nested children
+        })
+        .collect()
+}
+
+/// Parallel scan with view-based streaming.
 ///
 /// All parallel walkers push flat entries into a shared Vec. A dedicated
 /// emitter thread periodically builds a tree snapshot from ALL entries
-/// collected so far and emits it. This gives deep streaming at every
-/// level, even within large directories.
+/// collected so far, stores it in tree_state, then extracts the children
+/// at the current view_path and emits a lightweight `view-update` event.
 pub fn scan_directory(
     root: &str,
     app_handle: &AppHandle,
     cancelled: Arc<AtomicBool>,
+    tree_state: Arc<Mutex<Option<DirEntry>>>,
+    view_path: Arc<Mutex<String>>,
 ) -> Result<DirEntry, String> {
     let root_path = std::path::Path::new(root);
     if !root_path.exists() {
@@ -124,7 +157,7 @@ pub fn scan_directory(
         scanned_count.load(Ordering::Relaxed)
     );
 
-    // --- Emitter thread: periodically builds + emits tree snapshots ---
+    // --- Emitter thread: periodically builds tree, stores it, emits view-update ---
     let emitter_handle = {
         let entries = entries.clone();
         let done = done.clone();
@@ -132,6 +165,8 @@ pub fn scan_directory(
         let scanned_count = scanned_count.clone();
         let app_handle = app_handle.clone();
         let root_str = root.to_string();
+        let tree_state = tree_state.clone();
+        let view_path = view_path.clone();
 
         std::thread::spawn(move || {
             let mut emit_count: u32 = 0;
@@ -152,13 +187,40 @@ pub fn scan_directory(
                 };
 
                 if let Ok(tree) = tree {
-                    emit_count += 1;
+                    // Store tree for get_children to use
+                    *tree_state.lock().unwrap() = Some(tree.clone());
+
+                    // Get current view path
+                    let vp = view_path.lock().unwrap().clone();
+                    let view_node = if vp.is_empty() {
+                        &tree
+                    } else {
+                        find_node(&tree, &vp).unwrap_or(&tree)
+                    };
+
+                    // Extract shallow children
+                    let shallow_entries = shallow_children(view_node);
                     let count = scanned_count.load(Ordering::Relaxed);
+
+                    emit_count += 1;
                     eprintln!(
-                        "[scan] emit tree-update #{}: {} top children, {} total items, interval={}ms",
-                        emit_count, tree.child_count, count, interval
+                        "[scan] emit view-update #{}: {} entries at '{}', {} total items, interval={}ms",
+                        emit_count,
+                        shallow_entries.len(),
+                        view_node.name,
+                        count,
+                        interval
                     );
-                    let _ = app_handle.emit("scan-tree-update", &tree);
+
+                    let update = ViewUpdate {
+                        entries: shallow_entries,
+                        parent_path: view_node.path.clone(),
+                        parent_size: view_node.size,
+                        parent_name: view_node.name.clone(),
+                        total_scanned: count,
+                    };
+
+                    let _ = app_handle.emit("view-update", &update);
                 }
 
                 // Also emit progress
@@ -269,7 +331,37 @@ pub fn scan_directory(
 
     // Build final tree
     let e = entries.lock().unwrap();
-    build_tree(root, &e)
+    let final_tree = build_tree(root, &e)?;
+
+    // Store final tree in managed state
+    *tree_state.lock().unwrap() = Some(final_tree.clone());
+
+    // Emit final view-update so frontend gets the complete picture
+    {
+        let vp = view_path.lock().unwrap().clone();
+        let view_node = if vp.is_empty() {
+            &final_tree
+        } else {
+            find_node(&final_tree, &vp).unwrap_or(&final_tree)
+        };
+
+        let update = ViewUpdate {
+            entries: shallow_children(view_node),
+            parent_path: view_node.path.clone(),
+            parent_size: view_node.size,
+            parent_name: view_node.name.clone(),
+            total_scanned: count,
+        };
+
+        eprintln!(
+            "[scan] emit final view-update: {} entries at '{}'",
+            update.entries.len(),
+            view_node.name
+        );
+        let _ = app_handle.emit("view-update", &update);
+    }
+
+    Ok(final_tree)
 }
 
 /// Adaptive snapshot interval based on entry count.

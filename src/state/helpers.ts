@@ -1,52 +1,6 @@
 import type { DirEntry, SortField, SortDir } from './types'
 
 /**
- * Walk the tree by currentPath segments and return the children of the current folder.
- */
-export function getCurrentEntries(
-  tree: DirEntry | null,
-  currentPath: string[],
-): DirEntry[] {
-  const node = getCurrentNode(tree, currentPath)
-  return node?.children ?? []
-}
-
-/**
- * Walk the tree by currentPath segments and return the node itself.
- */
-export function getCurrentNode(
-  tree: DirEntry | null,
-  currentPath: string[],
-): DirEntry | null {
-  if (!tree) return null
-
-  let node = tree
-  for (const segment of currentPath) {
-    const child = node.children.find((c) => c.name === segment)
-    if (!child) return null
-    node = child
-  }
-  return node
-}
-
-/**
- * Recursively search the tree for an entry matching the given path string.
- */
-export function findEntry(
-  tree: DirEntry | null,
-  path: string,
-): DirEntry | null {
-  if (!tree) return null
-  if (tree.path === path) return tree
-
-  for (const child of tree.children) {
-    const found = findEntry(child, path)
-    if (found) return found
-  }
-  return null
-}
-
-/**
  * Sort entries: directories first, then by the chosen field and direction.
  */
 export function sortEntries(
@@ -128,36 +82,4 @@ export function formatDate(timestamp: number): string {
     month: 'short',
     day: 'numeric',
   })
-}
-
-/**
- * Return a new tree with the specified paths removed.
- * Parent sizes are recalculated after removal.
- */
-export function removePaths(
-  tree: DirEntry,
-  pathsToRemove: string[],
-): DirEntry {
-  const pathSet = new Set(pathsToRemove)
-
-  function recurse(node: DirEntry): DirEntry {
-    // Filter out children that are in the removal set
-    const filteredChildren = node.children
-      .filter((child) => !pathSet.has(child.path))
-      .map((child) => recurse(child))
-
-    // Recalculate size from remaining children
-    const childrenSize = filteredChildren.reduce((sum, c) => sum + c.size, 0)
-
-    return {
-      ...node,
-      children: filteredChildren,
-      child_count: filteredChildren.length,
-      // For directories, size is the sum of children.
-      // For files (which won't have children removed), keep original size.
-      size: node.is_dir ? childrenSize : node.size,
-    }
-  }
-
-  return recurse(tree)
 }

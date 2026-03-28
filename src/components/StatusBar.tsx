@@ -1,13 +1,12 @@
 import { useState, useMemo } from 'react'
 import { Trash2, Loader2, XCircle } from 'lucide-react'
 import { useStore } from '../state/store'
-import { getCurrentEntries, findEntry, formatSize } from '../state/helpers'
+import { formatSize } from '../state/helpers'
 import { useTrash, useScan } from '../hooks/useTauri'
 import { ConfirmDialog } from './ConfirmDialog'
 
 export function StatusBar() {
-  const tree = useStore(s => s.tree)
-  const currentPath = useStore(s => s.currentPath)
+  const viewEntries = useStore(s => s.viewEntries)
   const selectedPaths = useStore(s => s.selectedPaths)
   const scanning = useStore(s => s.scanning)
   const scanProgress = useStore(s => s.scanProgress)
@@ -16,19 +15,21 @@ export function StatusBar() {
   const { cancelScan } = useScan()
   const [showConfirm, setShowConfirm] = useState(false)
 
-  const entries = getCurrentEntries(tree, currentPath)
-  const totalSize = entries.reduce((sum, e) => sum + e.size, 0)
+  const totalSize = useMemo(
+    () => viewEntries.reduce((sum, e) => sum + e.size, 0),
+    [viewEntries],
+  )
   const selectedCount = selectedPaths.size
 
   const selectedSize = useMemo(() => {
     if (selectedCount === 0) return 0
     let total = 0
     for (const path of selectedPaths) {
-      const entry = findEntry(tree, path)
+      const entry = viewEntries.find((e) => e.path === path)
       if (entry) total += entry.size
     }
     return total
-  }, [selectedPaths, tree, selectedCount])
+  }, [selectedPaths, viewEntries, selectedCount])
 
   async function handleBatchTrash() {
     setShowConfirm(false)
@@ -45,7 +46,7 @@ export function StatusBar() {
         </span>
       ) : (
         <span className="text-xs text-[var(--color-text-tertiary)]">
-          {entries.length.toLocaleString()} items · {formatSize(totalSize)}
+          {viewEntries.length.toLocaleString()} items · {formatSize(totalSize)}
           {scanTime !== null && ` · Scanned in ${scanTime.toFixed(1)}s`}
         </span>
       )}

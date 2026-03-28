@@ -1,21 +1,20 @@
 import { useState } from 'react'
 import { Folder, File, Link, Lock, Trash2, ExternalLink } from 'lucide-react'
 import { useStore } from '../state/store'
-import { findEntry, getCurrentNode, formatSize, formatDate } from '../state/helpers'
+import { formatSize, formatDate } from '../state/helpers'
 import { useTrash, openInFinder } from '../hooks/useTauri'
 import { ConfirmDialog } from './ConfirmDialog'
 
 export function DetailPanel() {
   const activePath = useStore(s => s.activePath)
-  const tree = useStore(s => s.tree)
-  const currentPath = useStore(s => s.currentPath)
+  const viewEntries = useStore(s => s.viewEntries)
+  const parentSize = useStore(s => s.parentSize)
   const { trashItems } = useTrash()
   const [showConfirm, setShowConfirm] = useState(false)
   const [trashError, setTrashError] = useState<string | null>(null)
 
-  const entry = activePath ? findEntry(tree, activePath) : null
-  const parentNode = getCurrentNode(tree, currentPath)
-  const parentSize = parentNode?.size ?? 0
+  // Find the active entry in the flat viewEntries list
+  const entry = activePath ? viewEntries.find((e) => e.path === activePath) ?? null : null
   const percentOfParent = entry && parentSize > 0 ? ((entry.size / parentSize) * 100).toFixed(1) : null
 
   async function handleTrash() {

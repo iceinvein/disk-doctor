@@ -15,6 +15,8 @@ pub fn run() {
             commands::pick_folder,
             commands::scan_directory,
             commands::cancel_scan,
+            commands::set_view_path,
+            commands::get_children,
             commands::trash_items,
             commands::open_in_finder,
             commands::get_disk_usage,

@@ -1,30 +1,39 @@
 import { create } from 'zustand'
-import type { DirEntry, ScanProgress, SortField } from './types'
-import { getCurrentEntries, removePaths } from './helpers'
+import type { BreadcrumbSegment, DirEntry, ScanProgress, SortField, ViewUpdate } from './types'
 
 type AppStore = {
-  // State
-  tree: DirEntry | null
-  currentPath: string[]
+  // View state — flat list of current folder's children
+  viewEntries: DirEntry[]
+  parentSize: number
+  rootPath: string | null
+  rootName: string | null
+  breadcrumbs: BreadcrumbSegment[]
+
+  // Selection
   selectedPaths: Set<string>
   activePath: string | null
+
+  // Sort
   sortBy: SortField
   sortDir: 'asc' | 'desc'
+
+  // Scan
   scanning: boolean
   scanProgress: ScanProgress | null
   scanTime: number | null
+
+  // UI
   error: string | null
   showPermissionGuide: boolean
 
   // Actions
-  setTree: (tree: DirEntry, scanTime: number) => void
-  setScanning: (scanning: boolean) => void
-  setScanProgress: (progress: ScanProgress) => void
   initScan: (rootPath: string, rootName: string) => void
-  updateTree: (tree: DirEntry) => void
-  navigateInto: (folderName: string) => void
-  navigateToBreadcrumb: (index: number) => void
-  navigateBack: () => void
+  setViewUpdate: (update: ViewUpdate) => void
+  setViewEntries: (entries: DirEntry[], parentSize: number) => void
+  setScanComplete: (scanTime: number) => void
+  setScanProgress: (progress: ScanProgress) => void
+  setScanning: (scanning: boolean) => void
+  setBreadcrumbs: (breadcrumbs: BreadcrumbSegment[]) => void
   setActive: (path: string | null) => void
   toggleSelected: (path: string) => void
   selectAll: () => void
@@ -37,8 +46,11 @@ type AppStore = {
 }
 
 const initialState = {
-  tree: null as DirEntry | null,
-  currentPath: [] as string[],
+  viewEntries: [] as DirEntry[],
+  parentSize: 0,
+  rootPath: null as string | null,
+  rootName: null as string | null,
+  breadcrumbs: [] as BreadcrumbSegment[],
   selectedPaths: new Set<string>(),
   activePath: null as string | null,
   sortBy: 'size' as SortField,
@@ -53,74 +65,55 @@ const initialState = {
 export const useStore = create<AppStore>((set, get) => ({
   ...initialState,
 
-  setTree: (tree, scanTime) =>
+  initScan: (rootPath, rootName) =>
     set({
-      tree,
-      scanTime,
-      scanning: false,
+      rootPath,
+      rootName,
+      viewEntries: [],
+      parentSize: 0,
+      breadcrumbs: [{ name: rootName, path: rootPath }],
+      scanning: true,
       scanProgress: null,
-      currentPath: [],
+      scanTime: null,
       selectedPaths: new Set(),
       activePath: null,
       error: null,
       showPermissionGuide: false,
-      sortBy: get().sortBy,
-      sortDir: get().sortDir,
     }),
+
+  setViewUpdate: (update) => {
+    // During scanning, only apply if the update matches our current view
+    const { breadcrumbs } = get()
+    const currentViewPath = breadcrumbs.length > 0 ? breadcrumbs[breadcrumbs.length - 1].path : ''
+    if (currentViewPath && update.parent_path !== currentViewPath) {
+      console.log(
+        `[store] skipping view-update for '${update.parent_path}' (current view: '${currentViewPath}')`,
+      )
+      return
+    }
+    console.log(
+      `[store] applying view-update: ${update.entries.length} entries, parent='${update.parent_name}', parent_size=${update.parent_size}`,
+    )
+    set({ viewEntries: update.entries, parentSize: update.parent_size })
+  },
+
+  setViewEntries: (entries, parentSize) =>
+    set({
+      viewEntries: entries,
+      parentSize,
+      selectedPaths: new Set(),
+      activePath: null,
+    }),
+
+  setScanComplete: (scanTime) =>
+    set({ scanning: false, scanTime, scanProgress: null }),
 
   setScanning: (scanning) =>
     set({ scanning, scanProgress: scanning ? get().scanProgress : null }),
 
   setScanProgress: (progress) => set({ scanProgress: progress }),
 
-  initScan: (rootPath, rootName) =>
-    set({
-      tree: {
-        path: rootPath,
-        name: rootName,
-        size: 0,
-        is_dir: true,
-        child_count: 0,
-        modified: 0,
-        is_symlink: false,
-        is_restricted: false,
-        children: [],
-      },
-      scanning: true,
-      scanProgress: null,
-      scanTime: null,
-      currentPath: [],
-      selectedPaths: new Set(),
-      activePath: null,
-      error: null,
-      showPermissionGuide: false,
-    }),
-
-  updateTree: (tree) => set({ tree }),
-
-  navigateInto: (folderName) =>
-    set((s) => ({
-      currentPath: [...s.currentPath, folderName],
-      selectedPaths: new Set(),
-      activePath: null,
-    })),
-
-  navigateToBreadcrumb: (index) =>
-    set((s) => ({
-      currentPath: s.currentPath.slice(0, index),
-      selectedPaths: new Set(),
-      activePath: null,
-    })),
-
-  navigateBack: () => {
-    const { currentPath } = get()
-    if (currentPath.length === 0) return
-    set({
-      currentPath: currentPath.slice(0, -1),
-      selectedPaths: new Set(),
-      activePath: null,
-    })
-  },
+  setBreadcrumbs: (breadcrumbs) => set({ breadcrumbs }),
 
   setActive: (path) => set({ activePath: path }),
 
@@ -132,9 +125,8 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   selectAll: () => {
-    const { tree, currentPath } = get()
-    const entries = getCurrentEntries(tree, currentPath)
-    set({ selectedPaths: new Set(entries.map((e) => e.path)) })
+    const { viewEntries } = get()
+    set({ selectedPaths: new Set(viewEntries.map((e) => e.path)) })
   },
 
   deselectAll: () => set({ selectedPaths: new Set() }),
@@ -148,14 +140,14 @@ export const useStore = create<AppStore>((set, get) => ({
   },
 
   removePaths: (paths) => {
-    const { tree, selectedPaths, activePath } = get()
-    if (!tree) return
-    const newTree = removePaths(tree, paths)
+    const { viewEntries, selectedPaths, activePath } = get()
     const pathSet = new Set(paths)
+    const filtered = viewEntries.filter((e) => !pathSet.has(e.path))
     const newSelected = new Set(selectedPaths)
     for (const p of pathSet) newSelected.delete(p)
     set({
-      tree: newTree,
+      viewEntries: filtered,
+      parentSize: filtered.reduce((sum, e) => sum + e.size, 0),
       selectedPaths: newSelected,
       activePath: activePath && pathSet.has(activePath) ? null : activePath,
     })

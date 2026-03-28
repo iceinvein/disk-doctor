@@ -14,6 +14,15 @@ pub struct DirEntry {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ViewUpdate {
+    pub entries: Vec<DirEntry>,
+    pub parent_path: String,
+    pub parent_size: u64,
+    pub parent_name: String,
+    pub total_scanned: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ScanProgress {
     pub scanned_count: u32,
     pub current_path: String,

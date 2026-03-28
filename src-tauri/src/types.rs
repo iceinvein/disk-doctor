@@ -43,3 +43,13 @@ pub struct SavedScan {
     pub scanned_at: i64,
     pub scan_time: f64,
 }
+
+/// Lightweight metadata sent to frontend (no tree — avoids serializing 100MB+)
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SavedScanMeta {
+    pub root_path: String,
+    pub root_name: String,
+    pub root_size: u64,
+    pub scanned_at: i64,
+    pub scan_time: f64,
+}

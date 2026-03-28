@@ -2,7 +2,7 @@ import { useCallback, useEffect } from 'react'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { useStore } from '../state/store'
-import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment, SavedScan } from '../state/types'
+import type { DirEntry, ScanProgress, DiskUsage, ViewUpdate, BreadcrumbSegment, SavedScanMeta } from '../state/types'
 
 /**
  * Set up Tauri event listeners for scan streaming.
@@ -212,6 +212,6 @@ export async function getDiskUsage(path: string): Promise<DiskUsage> {
   return invoke<DiskUsage>('get_disk_usage', { path })
 }
 
-export async function loadSavedScan(): Promise<SavedScan | null> {
-  return invoke<SavedScan | null>('load_saved_scan')
+export async function loadSavedScan(): Promise<SavedScanMeta | null> {
+  return invoke<SavedScanMeta | null>('load_saved_scan')
 }

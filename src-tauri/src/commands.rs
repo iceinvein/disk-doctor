@@ -1,5 +1,5 @@
 use crate::scanner;
-use crate::types::{DirEntry, DiskUsage, SavedScan, ViewUpdate};
+use crate::types::{DirEntry, DiskUsage, SavedScan, SavedScanMeta, ViewUpdate};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::sync::Mutex;
@@ -164,58 +164,82 @@ fn save_dir() -> Result<std::path::PathBuf, String> {
 }
 
 #[tauri::command]
-pub fn save_scan(
+pub async fn save_scan(
     root_path: String,
     root_name: String,
     scan_time: f64,
     scan_state: State<'_, Mutex<ScanState>>,
 ) -> Result<(), String> {
-    let state = scan_state.lock().map_err(|e| e.to_string())?;
-    let tree_guard = state.tree.lock().map_err(|e| e.to_string())?;
-    let tree = tree_guard.as_ref().ok_or("No scan data to save")?;
-
-    let saved = SavedScan {
-        tree: tree.clone(),
-        root_path,
-        root_name,
-        scanned_at: std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .unwrap_or_default()
-            .as_secs() as i64,
-        scan_time,
+    // Clone tree under lock, then release lock before heavy work
+    let tree = {
+        let state = scan_state.lock().map_err(|e| e.to_string())?;
+        let tree_guard = state.tree.lock().map_err(|e| e.to_string())?;
+        tree_guard.as_ref().ok_or("No scan data to save")?.clone()
     };
 
-    let path = save_dir()?.join("last-scan.json");
-    let json = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
-    std::fs::write(&path, json).map_err(|e| e.to_string())?;
+    let size = tree.size;
 
-    eprintln!("[save] saved scan to {:?} ({} bytes)", path, tree.size);
-    Ok(())
+    // Serialize + write on a blocking thread to avoid freezing the UI
+    tauri::async_runtime::spawn_blocking(move || {
+        let saved = SavedScan {
+            tree,
+            root_path,
+            root_name,
+            scanned_at: std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64,
+            scan_time,
+        };
+
+        let path = save_dir()?.join("last-scan.json");
+        let json = serde_json::to_string(&saved).map_err(|e| e.to_string())?;
+        std::fs::write(&path, json).map_err(|e| e.to_string())?;
+
+        eprintln!("[save] saved scan to {:?} ({} bytes)", path, size);
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Save task failed: {}", e))?
 }
 
 #[tauri::command]
-pub fn load_saved_scan(
+pub async fn load_saved_scan(
     scan_state: State<'_, Mutex<ScanState>>,
-) -> Result<Option<SavedScan>, String> {
-    let path = save_dir()?.join("last-scan.json");
-    if !path.exists() {
+) -> Result<Option<SavedScanMeta>, String> {
+    let save_path = save_dir()?.join("last-scan.json");
+    if !save_path.exists() {
         return Ok(None);
     }
 
-    let json = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let saved: SavedScan = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+    // Read + deserialize on a blocking thread
+    let saved: SavedScan = tauri::async_runtime::spawn_blocking(move || {
+        let json = std::fs::read_to_string(&save_path).map_err(|e| e.to_string())?;
+        let saved: SavedScan = serde_json::from_str(&json).map_err(|e| e.to_string())?;
+        eprintln!(
+            "[load] restored scan: {} ({} bytes, scanned at {})",
+            saved.root_name, saved.tree.size, saved.scanned_at
+        );
+        Ok::<SavedScan, String>(saved)
+    })
+    .await
+    .map_err(|e| format!("Load task failed: {}", e))??;
 
-    // Also restore the tree into managed state so get_children works
+    // Restore tree into managed state (pointer swap, no serialization)
+    let meta = SavedScanMeta {
+        root_path: saved.root_path.clone(),
+        root_name: saved.root_name.clone(),
+        root_size: saved.tree.size,
+        scanned_at: saved.scanned_at,
+        scan_time: saved.scan_time,
+    };
+
     let state = scan_state.lock().map_err(|e| e.to_string())?;
-    *state.tree.lock().unwrap() = Some(saved.tree.clone());
     *state.view_path.lock().unwrap() = saved.root_path.clone();
+    // Move the tree (no clone needed — we own it)
+    *state.tree.lock().unwrap() = Some(saved.tree);
 
-    eprintln!(
-        "[load] restored scan: {} ({} bytes, scanned at {})",
-        saved.root_name, saved.tree.size, saved.scanned_at
-    );
-
-    Ok(Some(saved))
+    Ok(Some(meta))
 }
 
 #[tauri::command]

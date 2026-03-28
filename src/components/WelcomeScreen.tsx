@@ -3,7 +3,7 @@ import { FolderSearch, Shield, History } from 'lucide-react'
 import { useScan, loadSavedScan, useNavigation } from '../hooks/useTauri'
 import { useStore } from '../state/store'
 import { formatSize } from '../state/helpers'
-import type { SavedScan } from '../state/types'
+import type { SavedScanMeta } from '../state/types'
 
 function timeAgo(timestamp: number): string {
   const now = Math.floor(Date.now() / 1000)
@@ -20,7 +20,7 @@ export function WelcomeScreen() {
   const { navigateTo } = useNavigation()
   const initScan = useStore(s => s.initScan)
   const setScanComplete = useStore(s => s.setScanComplete)
-  const [savedScan, setSavedScan] = useState<SavedScan | null>(null)
+  const [savedScan, setSavedScan] = useState<SavedScanMeta | null>(null)
 
   useEffect(() => {
     loadSavedScan().then(setSavedScan).catch(console.error)
@@ -83,7 +83,7 @@ export function WelcomeScreen() {
 
           {savedScan && (
             <p className="text-xs text-[var(--color-text-tertiary)] text-center -mt-1 mb-1">
-              {savedScan.root_name} · {formatSize(savedScan.tree.size)} · {timeAgo(savedScan.scanned_at)}
+              {savedScan.root_name} · {formatSize(savedScan.root_size)} · {timeAgo(savedScan.scanned_at)}
             </p>
           )}
 

@@ -37,10 +37,10 @@ export type DiskUsage = {
 export type SortField = 'size' | 'name' | 'modified'
 export type SortDir = 'asc' | 'desc'
 
-export type SavedScan = {
-  tree: DirEntry
+export type SavedScanMeta = {
   root_path: string
   root_name: string
+  root_size: number
   scanned_at: number
   scan_time: number
 }

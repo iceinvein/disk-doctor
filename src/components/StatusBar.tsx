@@ -45,7 +45,7 @@ export function StatusBar() {
           Scanning… {scanProgress ? `${scanProgress.scanned_count.toLocaleString()} items found` : ''}
         </span>
       ) : (
-        <span className="text-xs text-[var(--color-text-tertiary)]">
+        <span className={`text-xs text-[var(--color-text-tertiary)] ${scanTime !== null ? 'scan-complete-pulse' : ''}`}>
           {viewEntries.length.toLocaleString()} items · {formatSize(totalSize)}
           {scanTime !== null && ` · Scanned in ${scanTime.toFixed(1)}s`}
         </span>

@@ -1,5 +1,5 @@
-import { useEffect, useRef } from 'react'
-import { FolderOpen, Trash2, ExternalLink, Copy } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { FolderOpen, Trash2, ExternalLink, Copy, Check } from 'lucide-react'
 import type { DirEntry } from '../state/types'
 import { openInFinder } from '../hooks/useTauri'
 
@@ -14,6 +14,7 @@ type ContextMenuProps = {
 
 export function ContextMenu({ x, y, entry, onClose, onNavigate, onTrash }: ContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
+  const [copied, setCopied] = useState(false)
 
   useEffect(() => {
     function handleClick(e: MouseEvent) {
@@ -51,7 +52,8 @@ export function ContextMenu({ x, y, entry, onClose, onNavigate, onTrash }: Conte
 
   function handleCopyPath() {
     navigator.clipboard.writeText(entry.path)
-    onClose()
+    setCopied(true)
+    setTimeout(onClose, 600)
   }
 
   function handleReveal() {
@@ -72,7 +74,7 @@ export function ContextMenu({ x, y, entry, onClose, onNavigate, onTrash }: Conte
   return (
     <div
       ref={menuRef}
-      className="fixed z-50 bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-lg shadow-2xl py-1 min-w-48 fade-in"
+      className="fixed z-50 bg-[var(--color-bg-secondary)] border border-[var(--color-border)] rounded-lg shadow-2xl py-1 min-w-48 context-menu-enter"
       style={{ left: x, top: y }}
     >
       {entry.is_dir && (
@@ -112,8 +114,8 @@ export function ContextMenu({ x, y, entry, onClose, onNavigate, onTrash }: Conte
         onClick={handleCopyPath}
         className="flex items-center w-full px-3 py-1.5 text-xs text-[var(--color-text-primary)] hover:bg-[var(--color-accent)] hover:text-white transition-colors cursor-pointer gap-2"
       >
-        <Copy size={13} />
-        <span className="flex-1 text-left">Copy Path</span>
+        {copied ? <Check size={13} className="text-[var(--color-success)]" /> : <Copy size={13} />}
+        <span className="flex-1 text-left">{copied ? 'Copied!' : 'Copy Path'}</span>
       </button>
     </div>
   )

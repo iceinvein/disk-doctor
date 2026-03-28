@@ -84,7 +84,7 @@ export function DetailPanel() {
       <div className="flex flex-col gap-2 mt-auto">
         <button
           onClick={() => setShowConfirm(true)}
-          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-danger)] text-white text-sm font-medium hover:brightness-110 transition-all cursor-pointer"
+          className="flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-[var(--color-danger)] text-white text-sm font-medium hover:brightness-110 transition-all cursor-pointer btn-press"
         >
           <Trash2 size={14} />
           Move to Trash

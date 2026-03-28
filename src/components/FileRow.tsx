@@ -118,8 +118,20 @@ export function FileRow({
 
       <Icon size={18} style={{ color }} className="shrink-0" />
 
-      <span className="text-sm text-[var(--color-text-primary)] truncate min-w-0 flex-1">
-        {entry.name}
+      <span className="text-sm truncate min-w-0 flex-1">
+        {entry.is_dir ? (
+          <button
+            onClick={(e) => {
+              e.stopPropagation()
+              onNavigate()
+            }}
+            className="text-[var(--color-text-primary)] hover:text-[var(--color-accent)] transition-colors cursor-pointer text-left"
+          >
+            {entry.name}
+          </button>
+        ) : (
+          <span className="text-[var(--color-text-primary)]">{entry.name}</span>
+        )}
         {entry.is_restricted && (
           <span className="text-xs text-[var(--color-text-tertiary)] ml-1.5" title="Permission denied — cannot read this folder">
             restricted
@@ -139,7 +151,16 @@ export function FileRow({
       </span>
 
       {entry.is_dir ? (
-        <ChevronRight size={14} className="text-[var(--color-text-tertiary)] shrink-0" />
+        <button
+          onClick={(e) => {
+            e.stopPropagation()
+            onNavigate()
+          }}
+          className="shrink-0 text-[var(--color-text-tertiary)] hover:text-[var(--color-accent)] transition-colors cursor-pointer"
+          aria-label={`Open ${entry.name}`}
+        >
+          <ChevronRight size={14} />
+        </button>
       ) : (
         <div className="w-3.5 shrink-0" />
       )}

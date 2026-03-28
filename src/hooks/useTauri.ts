@@ -117,14 +117,18 @@ export function useNavigation() {
 
   const navigateTo = useCallback(
     async (path: string, breadcrumbs: BreadcrumbSegment[]) => {
-      console.log(`[nav] navigateTo: ${path}`)
-      await invoke('set_view_path', { path })
-      const result = await invoke<ViewUpdate>('get_children', { path })
-      console.log(
-        `[nav] got ${result.entries.length} children, parent_size=${result.parent_size}`,
-      )
-      setBreadcrumbs(breadcrumbs)
-      setViewEntries(result.entries, result.parent_size)
+      try {
+        console.log(`[nav] navigateTo: ${path}`)
+        await invoke('set_view_path', { path })
+        const result = await invoke<ViewUpdate>('get_children', { path })
+        console.log(
+          `[nav] got ${result.entries.length} children, parent_size=${result.parent_size}`,
+        )
+        setBreadcrumbs(breadcrumbs)
+        setViewEntries(result.entries, result.parent_size)
+      } catch (error) {
+        console.error(`[nav] failed to navigate to ${path}:`, error)
+      }
     },
     [setViewEntries, setBreadcrumbs],
   )

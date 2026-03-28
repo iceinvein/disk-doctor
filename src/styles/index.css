@@ -147,6 +147,61 @@ html, body {
   transform: scale(0.97);
 }
 
+/* ─── Light mode ─── */
+@media (prefers-color-scheme: light) {
+  :root {
+    /* Backgrounds — Apple's light mode grays */
+    --color-bg-primary: #f5f5f7;
+    --color-bg-secondary: #ffffff;
+    --color-bg-tertiary: #ececee;
+    --color-bg-row: #ffffff;
+    --color-bg-hover: #e8e8ed;
+    --color-bg-selected: rgba(10, 132, 255, 0.08);
+
+    /* Borders — subtler in light mode */
+    --color-border: #d2d2d7;
+    --color-border-light: #e5e5ea;
+
+    /* Text — dark grays, not pure black */
+    --color-text-primary: #1d1d1f;
+    --color-text-secondary: #6e6e73;
+    --color-text-tertiary: #98989d;
+
+    /* Accent — same blue, works in both modes */
+    --color-accent: #007aff;
+    --color-accent-hover: #0066d6;
+
+    /* Semantic */
+    --color-danger: #ff3b30;
+    --color-danger-bg: rgba(255, 59, 48, 0.08);
+    --color-success: #28cd41;
+    --color-warning: #ffcc00;
+
+    /* Category colors — adjusted for light background contrast */
+    --color-cat-folder: #007aff;
+    --color-cat-media: #e8450e;
+    --color-cat-audio: #af52de;
+    --color-cat-archive: #e6a800;
+    --color-cat-code: #28cd41;
+    --color-cat-document: #32ade6;
+    --color-cat-system: #8e8e93;
+    --color-cat-other: #aeaeb2;
+  }
+
+  html, body {
+    background: var(--color-bg-primary);
+    color: var(--color-text-primary);
+  }
+
+  /* Light mode scrollbar */
+  ::-webkit-scrollbar-thumb {
+    background: rgba(0, 0, 0, 0.15);
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(0, 0, 0, 0.25);
+  }
+}
+
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

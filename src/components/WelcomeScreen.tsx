@@ -1,10 +1,8 @@
 import { HardDrive, FolderSearch, Shield } from 'lucide-react'
 import { useScan } from '../hooks/useTauri'
-import { useAppState } from '../state/context'
 
 export function WelcomeScreen() {
   const { scanFolder, scanEntireDisk } = useScan()
-  const { state } = useAppState()
 
   return (
     <div className="flex flex-col items-center justify-center flex-1 px-8">
@@ -42,12 +40,6 @@ export function WelcomeScreen() {
         Scanning the entire disk requires Full Disk Access in<br />
         System Settings &rarr; Privacy &amp; Security
       </p>
-
-      {state.error && (
-        <div className="mt-4 px-4 py-3 rounded-xl bg-[var(--color-danger-bg)] border border-[var(--color-danger)]/20 text-[var(--color-danger)] text-sm max-w-sm text-center">
-          {state.error}
-        </div>
-      )}
     </div>
   )
 }

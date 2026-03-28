@@ -116,14 +116,16 @@ pub fn get_children(
         .ok_or("No active scan")?;
     let conn = state.read_db.lock().map_err(|e| e.to_string())?;
 
-    let entries =
-        db::get_children(&conn, scan_id, &path).map_err(|e| format!("DB error: {}", e))?;
+    // Always use live-computed sizes so navigation shows accurate bars
+    // (during scan: directories sum their subtrees; after scan: stored sizes are already correct)
+    let (entries, live_parent_size) =
+        db::get_children_with_live_sizes(&conn, scan_id, &path).map_err(|e| format!("DB error: {}", e))?;
     let parent = db::get_entry(&conn, scan_id, &path)
         .map_err(|e| format!("DB error: {}", e))?;
 
     let (parent_path, parent_size, parent_name) = match &parent {
-        Some(p) => (p.path.clone(), p.size, p.name.clone()),
-        None => (path.clone(), 0, String::new()),
+        Some(p) => (p.path.clone(), live_parent_size, p.name.clone()),
+        None => (path.clone(), live_parent_size, String::new()),
     };
 
     log!(Cmd, "get_children({}) → {} entries, parent_size={}", path, entries.len(), parent_size);

@@ -154,17 +154,18 @@ pub fn scan_directory(
 
                 let vp = view_path.lock().unwrap().clone();
 
+                // Use live-computed sizes during scan (directories sum their subtree files)
                 let conn = db.lock().unwrap();
-                let entries = match db::get_children(&conn, scan_id, &vp) {
-                    Ok(e) => e,
+                let (entries, parent_live_size) = match db::get_children_with_live_sizes(&conn, scan_id, &vp) {
+                    Ok(result) => result,
                     Err(_) => continue,
                 };
                 let parent = db::get_entry(&conn, scan_id, &vp).ok().flatten();
-                drop(conn); // Release lock before emitting
+                drop(conn);
 
                 let (parent_path, parent_size, parent_name) = match &parent {
-                    Some(p) => (p.path.clone(), p.size, p.name.clone()),
-                    None => (vp.clone(), 0, String::new()),
+                    Some(p) => (p.path.clone(), parent_live_size, p.name.clone()),
+                    None => (vp.clone(), parent_live_size, String::new()),
                 };
 
                 emit_count += 1;

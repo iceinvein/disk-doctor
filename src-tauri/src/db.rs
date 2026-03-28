@@ -185,6 +185,76 @@ pub fn get_children(
     Ok(entries)
 }
 
+/// Get children with live-computed sizes (for use during scanning).
+/// For files: uses the stored size. For directories: sums all file sizes
+/// in the subtree by matching path prefix. Slower than get_children but
+/// gives accurate sizes before compute_folder_sizes has run.
+pub fn get_children_with_live_sizes(
+    conn: &Connection,
+    scan_id: i64,
+    parent_path: &str,
+) -> rusqlite::Result<(Vec<DirEntry>, u64)> {
+    // Get all children at this path
+    let mut stmt = conn.prepare_cached(
+        "SELECT path, name, size, is_dir, modified, is_symlink, is_restricted FROM entries WHERE scan_id = ?1 AND parent_path = ?2",
+    )?;
+
+    let raw_entries: Vec<(String, String, i64, bool, i64, bool, bool)> = stmt
+        .query_map(params![scan_id, parent_path], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+                row.get::<_, i32>(3)? != 0,
+                row.get::<_, i64>(4)?,
+                row.get::<_, i32>(5)? != 0,
+                row.get::<_, i32>(6)? != 0,
+            ))
+        })?
+        .filter_map(|r| r.ok())
+        .collect();
+
+    // For directories, compute live size by summing all files in subtree
+    let mut size_stmt = conn.prepare_cached(
+        "SELECT COALESCE(SUM(size), 0) FROM entries WHERE scan_id = ?1 AND is_dir = 0 AND path LIKE ?2",
+    )?;
+    let mut count_stmt = conn.prepare_cached(
+        "SELECT COUNT(*) FROM entries WHERE scan_id = ?1 AND parent_path = ?2",
+    )?;
+
+    let mut entries: Vec<DirEntry> = Vec::with_capacity(raw_entries.len());
+    let mut total_size: u64 = 0;
+
+    for (path, name, size, is_dir, modified, is_symlink, is_restricted) in &raw_entries {
+        let (live_size, child_count) = if *is_dir {
+            let pattern = format!("{}/%", path);
+            let s: i64 = size_stmt.query_row(params![scan_id, pattern], |row| row.get(0))?;
+            let c: i64 = count_stmt.query_row(params![scan_id, path], |row| row.get(0))?;
+            (s as u64, c as u32)
+        } else {
+            (*size as u64, 0u32)
+        };
+
+        total_size += live_size;
+
+        entries.push(DirEntry {
+            path: path.clone(),
+            name: name.clone(),
+            size: live_size,
+            is_dir: *is_dir,
+            child_count,
+            modified: *modified,
+            is_symlink: *is_symlink,
+            is_restricted: *is_restricted,
+            children: vec![],
+        });
+    }
+
+    entries.sort_by(|a, b| b.size.cmp(&a.size));
+
+    Ok((entries, total_size))
+}
+
 /// Get a single entry by path.
 pub fn get_entry(
     conn: &Connection,

@@ -21,8 +21,7 @@ type AppStore = {
   setScanning: (scanning: boolean) => void
   setScanProgress: (progress: ScanProgress) => void
   initScan: (rootPath: string, rootName: string) => void
-  setDiscoveredEntries: (entries: DirEntry[]) => void
-  updateScannedEntry: (entry: DirEntry) => void
+  updateTree: (tree: DirEntry) => void
   navigateInto: (folderName: string) => void
   navigateToBreadcrumb: (index: number) => void
   navigateBack: () => void
@@ -97,27 +96,7 @@ export const useStore = create<AppStore>((set, get) => ({
       showPermissionGuide: false,
     }),
 
-  setDiscoveredEntries: (entries) => {
-    const tree = get().tree
-    if (!tree) return
-    const totalSize = entries.reduce((sum, c) => sum + c.size, 0)
-    set({
-      tree: { ...tree, children: entries, child_count: entries.length, size: totalSize },
-    })
-  },
-
-  updateScannedEntry: (entry) => {
-    const tree = get().tree
-    if (!tree) return
-    const updated = tree.children.map((child) =>
-      child.path === entry.path ? entry : child,
-    )
-    updated.sort((a, b) => b.size - a.size)
-    const newSize = updated.reduce((sum, c) => sum + c.size, 0)
-    set({
-      tree: { ...tree, children: updated, child_count: updated.length, size: newSize },
-    })
-  },
+  updateTree: (tree) => set({ tree }),
 
   navigateInto: (folderName) =>
     set((s) => ({

@@ -14,18 +14,13 @@ export function useScanEvents() {
       useStore.getState().setScanProgress(event.payload)
     })
 
-    const unlistenDiscovered = listen<DirEntry[]>('scan-entries-discovered', (event) => {
-      useStore.getState().setDiscoveredEntries(event.payload)
-    })
-
-    const unlistenUpdated = listen<DirEntry>('scan-entry-updated', (event) => {
-      useStore.getState().updateScannedEntry(event.payload)
+    const unlistenTree = listen<DirEntry>('scan-tree-update', (event) => {
+      useStore.getState().updateTree(event.payload)
     })
 
     return () => {
       unlistenProgress.then((fn) => fn())
-      unlistenDiscovered.then((fn) => fn())
-      unlistenUpdated.then((fn) => fn())
+      unlistenTree.then((fn) => fn())
     }
   }, [])
 }

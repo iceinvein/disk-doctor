@@ -4,6 +4,7 @@ import { useStore } from '../state/store'
 import { sortEntries } from '../state/helpers'
 import { useNavigation, useTrash } from '../hooks/useTauri'
 import { FileRow } from './FileRow'
+import { Hint } from './Hint'
 import { ContextMenu } from './ContextMenu'
 import { ConfirmDialog } from './ConfirmDialog'
 import { formatSize } from '../state/helpers'
@@ -126,6 +127,15 @@ export function FileList() {
         {/* Spacer for chevron */}
         <div className="w-3.5 shrink-0" />
       </div>
+
+      {/* First-use hint */}
+      {!scanning && entries.some(e => e.is_dir) && (
+        <div className="px-3 py-1.5 shrink-0">
+          <Hint id="folder-nav">
+            Click a folder name to explore inside. Right-click for more options. Press <kbd className="font-semibold">?</kbd> for keyboard shortcuts.
+          </Hint>
+        </div>
+      )}
 
       {/* Virtualized list */}
       <div ref={parentRef} className="flex-1 overflow-auto nav-transition">
